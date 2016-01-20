@@ -30,7 +30,7 @@
 #SBATCH -n 2
 #SBATCH -N 1
 #SBATCH -J bam2fastq
-#SBATCH -t 6:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o bam2fastq.%j.out
 #SBATCH -e bam2fastq.%j.err
 
@@ -76,5 +76,6 @@ java -Xmx8G -jar "${PICARD_HOME}"/picard.jar RevertSam \
 # move the results back from the node to the output directory
 if [ ! -z "$SLURM_JOB_ID" ]
 then
-  mv "$SNIC_TMP/*.fastq.gz" "`dirname ${IN}`"
+  cp "$SNIC_TMP/$F1" "`dirname ${IN}`"
+  cp "$SNIC_TMP/$F2" "`dirname ${IN}`"
 fi
