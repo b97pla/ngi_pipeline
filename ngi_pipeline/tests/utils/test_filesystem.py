@@ -19,7 +19,7 @@ class TestFilesystemUtils(unittest.TestCase):
     def test_locate_flowcell(self):
         flowcell_name = "temp_flowcell"
         tmp_dir = tempfile.mkdtemp()
-        config = {'environment': {'flowcell_inbox': tmp_dir}}
+        config = {'environment': {'flowcell_inbox': [tmp_dir]}}
         with self.assertRaises(ValueError):
             # Should raise ValueError if flowcell can't be found
             locate_flowcell(flowcell=flowcell_name, config=config)

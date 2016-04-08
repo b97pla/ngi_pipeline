@@ -105,8 +105,8 @@ def locate_project(project, subdir="DATA", resolve_symlinks=True,
     else:
         try:
             base_root = config["analysis"]["base_root"]
-            node_roots = [config["analysis"]["sthlm_root"],
-                         config["analysis"].get("upps_root")]
+            node_roots = [config["analysis"].get("sthlm_root"),
+                          config["analysis"].get("upps_root")]
             top_dir = config["analysis"]["top_dir"]
         except (KeyError, TypeError) as e:
             raise ValueError('Path to project data directory not available in '
@@ -121,8 +121,7 @@ def locate_project(project, subdir="DATA", resolve_symlinks=True,
                     try:
                         return os.path.realpath(project_dir)
                     except OSError as e:
-                        # should this be thrown?
-                        pass
+                        raise
                 return project_dir
         raise ValueError('project directory passed as project name (not '
                          'full path) and does not exist under project '
