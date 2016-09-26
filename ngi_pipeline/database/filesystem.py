@@ -61,10 +61,12 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                 LOG.error('Could not delete sample "{}": {}'.format(sample, e))
         try:
             analysis_status = "TO_ANALYZE"
+            sample_status = "FRESH"
             LOG.info('Creating sample "{}" with analysis_status "{}"'.format(sample, analysis_status))
             charon_session.sample_create(projectid=project.project_id,
                                          sampleid=sample.name,
-                                         analysis_status=analysis_status)
+                                         analysis_status=analysis_status,
+                                         status=sample_status)
             LOG.info('Project/sample "{}/{}" created in Charon.'.format(project, sample))
         except CharonError as e:
             if e.status_code == 400:
@@ -73,7 +75,8 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                              'sample "{}"'.format(project, sample))
                     charon_session.sample_update(projectid=project.project_id,
                                                  sampleid=sample.name,
-                                                 analysis_status=analysis_status)
+                                                 analysis_status=analysis_status,
+                                                 status=sample_status)
                     LOG.info('Project/sample "{}/{}" updated in Charon.'.format(project, sample))
                 else:
                     LOG.info('Project "{}" / sample "{}" already exists; moving '

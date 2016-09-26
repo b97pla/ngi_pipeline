@@ -443,6 +443,8 @@ def record_process_sample(project, sample, workflow_subtask, analysis_module_nam
             sample_status_value = "UNDER_ANALYSIS"
             seqrun_status_field = "alignment_status"
             seqrun_status_value = "RUNNING"
+            seqdata_status_field = "status"
+            seqdata_status_value = "STALE"
             extra_args = {"mean_autosomal_coverage": 0}
         elif workflow_subtask == "genotype_concordance":
             sample_status_field = seqrun_status_field = "genotype_status"
@@ -455,7 +457,8 @@ def record_process_sample(project, sample, workflow_subtask, analysis_module_nam
                      '{}/{} key : {} value : {}'.format(project, sample, sample_status_field, sample_status_value))
             CharonSession().sample_update(projectid=project.project_id,
                                           sampleid=sample.name,
-                                          **{sample_status_field: sample_status_value})
+                                          **{sample_status_field: sample_status_value,
+                                             seqdata_status_field: seqdata_status_value})
             project_obj = create_project_obj_from_analysis_log(project.name,
                                                                project.project_id,
                                                                project.base_path,

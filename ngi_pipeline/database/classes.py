@@ -58,7 +58,7 @@ class CharonSession(requests.Session):
         self._sample_params = ('sampleid', 'analysis_status', 'qc_status',
                                'genotype_status', 'genotype_concordance',
                                'total_autosomal_coverage', 'total_sequenced_reads',
-                               'delivery_status', 'duplication_pc')
+                               'delivery_status', 'duplication_pc', 'status')
         self._sample_reset_params = tuple(set(self._sample_params) - \
                                           set(['sampleid', 'total_sequenced_reads']))
         self._libprep_params = ('libprepid', 'qc')
@@ -117,7 +117,7 @@ class CharonSession(requests.Session):
     def sample_create(self, projectid, sampleid, analysis_status=None,
                       qc_status=None, genotype_status=None,
                       genotype_concordance=None, total_autosomal_coverage=None,
-                      total_sequenced_reads=None, delivery_status=None):
+                      total_sequenced_reads=None, delivery_status=None, status=None):
         url = self.construct_charon_url("sample", projectid)
         l_dict = locals()
         data = { k: l_dict.get(k) for k in self._sample_params }
@@ -136,7 +136,7 @@ class CharonSession(requests.Session):
     def sample_update(self, projectid, sampleid, analysis_status=None,
                       qc_status=None, genotype_status=None,
                       genotype_concordance=None, total_autosomal_coverage=None,
-                      total_sequenced_reads=None, delivery_status=None, duplication_pc=None):
+                      total_sequenced_reads=None, delivery_status=None, duplication_pc=None, status=None):
         url = self.construct_charon_url("sample", projectid, sampleid)
         l_dict = locals()
         data = { k: l_dict.get(k) for k in self._sample_params if l_dict.get(k)}

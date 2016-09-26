@@ -93,6 +93,7 @@ class TestCharonFunctions(unittest.TestCase):
 
     def test_06_sample_update(self):
         self.session.sample_update(projectid=self.p_id, sampleid=self.s_id,
+                                   status="STALE",
                                    analysis_status="UNDER_ANALYSIS",
                                    genotype_status="UNDER_ANALYSIS")
 

@@ -152,6 +152,8 @@ def write_to_charon_NGI_results(job_id, return_code, run_dir):
 
     :raises RuntimeError: If the Charon database could not be updated
     """
+    raise NotImplementedError(
+        "The ngi_pipeline.database.local_process_tracking.write_to_charon_NGI_results method needs review")
     charon_session = CharonSession()
     # Consider moving this mapping to the CharonSession object or something
     if return_code is None:

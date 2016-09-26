@@ -21,6 +21,7 @@ def main(project):
     for sample in samples["samples"]:
         
         charon_session.sample_update(project, sample["sampleid"],
+                                     status="FRESH",
                                      analysis_status= "TO_ANALYZE",
                                      genotype_status=None,
                                      total_autosomal_coverage="0",
