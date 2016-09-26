@@ -35,6 +35,7 @@ class NGIProject(NGIObject):
         self.add_sample = self._add_subitem
         self.project_id = project_id
         self.command_lines = []
+        self.chip_genotypes = None
 
 
 class NGISample(NGIObject):
@@ -69,3 +70,8 @@ class NGISeqRun(NGIObject):
         else:
             raise TypeError("Fastq files must be passed as a list or a string: " \
                             "got \"{}\"".format(fastq))
+
+class NGIChipGenotypes(NGIObject):
+    def __init__(self, *args, **kwargs):
+        super(NGIChipGenotypes, self).__init__(*args, **kwargs, subitem_type=None)
+

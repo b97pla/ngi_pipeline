@@ -243,6 +243,8 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                                     project_id not in restrict_to_projects:
             LOG.debug("Skipping project {} (not in restrict_to_projects)".format(project_name))
             continue
+        # Locate chip genotypes for project, if available
+
         LOG.info("Setting up project {}".format(project.get("project_name")))
         # Create a project directory if it doesn't already exist, including
         # intervening "DATA" directory

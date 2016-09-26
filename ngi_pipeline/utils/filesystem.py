@@ -127,6 +127,34 @@ def locate_project(project, subdir="DATA", resolve_symlinks=True,
                     pass
             return project_dir
 
+@with_ngi_config
+def locate_genotypes(project, resolve_symlinks=True, config=None):
+    """Searches the path specified in the config for available chip genotypes for the supplied project. Assumes a
+    directory structure according to: /path/to/genotypes/specified/in/config/PROJECT/*.vcf[.gz]
+
+    :param str project: The name of (or path to) the project
+    :param bool resolve_symlinks: Resolve symlinks when found (default True)
+    :returns: The path to the project
+    :rtype: str
+    """
+
+    # get the root directory where genotypes are stored
+    try:
+        genotype_root_dir = config["analysis"]["genotype_root"]
+    except KeyError as ke:
+        LOG.info("No config entry for 'genotype_root' found under 'analysis', will not search for chip genotypes")
+        return None
+
+    # check if there are genotypes for the project
+    genotype_project_dir = os.path.join(genotype_root_dir, project)
+    if os.path.exists(genotype_project_dir):
+        pattern = os.path.join(genotype_project_dir, "*.vcf*")
+        project_genotypes = filter(lambda f: f.endswith(".vcf") or f.endswith(".vcf.gz"), glob.glob(pattern))
+    if project_genotypes is None:
+        LOG.info("No chip genotypes found for project '{}' at {}".format(project, genotype_project_dir))
+
+
+
 
 def execute_command_line(cl, shell=False, stdout=None, stderr=None, cwd=None):
     """Execute a command line and return the subprocess.Popen object.
