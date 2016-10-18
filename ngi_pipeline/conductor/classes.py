@@ -28,14 +28,14 @@ class NGIObject(object):
 
 ## TODO consider changing the default __repr__ and __str__ to project_id
 class NGIProject(NGIObject):
-    def __init__(self, name, dirname, project_id, base_path):
+    def __init__(self, name, dirname, project_id, base_path, chip_genotypes=None):
         self.base_path = base_path
         super(NGIProject, self).__init__(name, dirname, subitem_type=NGISample)
         self.samples = self._subitems
         self.add_sample = self._add_subitem
         self.project_id = project_id
         self.command_lines = []
-        self.chip_genotypes = None
+        self.chip_genotypes = chip_genotypes
 
 
 class NGISample(NGIObject):
@@ -73,5 +73,5 @@ class NGISeqRun(NGIObject):
 
 class NGIChipGenotypes(NGIObject):
     def __init__(self, *args, **kwargs):
-        super(NGIChipGenotypes, self).__init__(*args, **kwargs, subitem_type=None)
+        super(NGIChipGenotypes, self).__init__(subitem_type=None, *args, **kwargs)
 

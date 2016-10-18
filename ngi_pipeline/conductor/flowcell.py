@@ -9,7 +9,7 @@ import os
 import re
 import sys
 
-from ngi_pipeline.conductor.classes import NGIProject
+from ngi_pipeline.conductor.classes import NGIProject, NGIChipGenotypes
 from ngi_pipeline.conductor.launchers import launch_analysis
 from ngi_pipeline.database.classes import CharonSession, CharonError
 from ngi_pipeline.database.communicate import get_project_id_from_name
@@ -18,7 +18,8 @@ from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.utils.classes import with_ngi_config
 from ngi_pipeline.utils.communication import mail_analysis
 from ngi_pipeline.utils.filesystem import do_rsync, do_symlink, \
-                                          locate_flowcell, safe_makedir
+                                          locate_flowcell, safe_makedir, \
+    locate_chip_genotypes_for_project
 from ngi_pipeline.utils.parsers import determine_library_prep_from_fcid, \
                                        determine_library_prep_from_samplesheet, \
                                        parse_lane_from_filename
@@ -244,6 +245,7 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
             LOG.debug("Skipping project {} (not in restrict_to_projects)".format(project_name))
             continue
         # Locate chip genotypes for project, if available
+        chip_genotype_files = locate_chip_genotypes_for_project(project_name, config=config)
 
         LOG.info("Setting up project {}".format(project.get("project_name")))
         # Create a project directory if it doesn't already exist, including
@@ -266,8 +268,13 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
         except KeyError:
             project_obj = NGIProject(name=project_name, dirname=project_id,
                                      project_id=project_id,
-                                     base_path=analysis_top_dir)
+                                     base_path=analysis_top_dir,
+                                     chip_genotypes=map(
+                                         lambda f: NGIChipGenotypes(name=os.path.basename(f)),
+                                         chip_genotype_files) if chip_genotype_files is not None else None)
             projects_to_analyze[project_dir] = project_obj
+
+        #### TODO: symlink chip genotypes
         # Iterate over the samples in the project
         for sample in project.get('samples', []):
             sample_name = sample['sample_name']
