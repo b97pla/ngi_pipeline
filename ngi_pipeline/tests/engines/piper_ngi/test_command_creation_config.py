@@ -95,11 +95,3 @@ class TestCommandCreation(unittest.TestCase):
         cl = build_piper_cl(generate_bqsr_bam=True, **kwargs).split(" ")
         _validate_cl(cl)
         assert '--keep_pre_bqsr_bam' not in cl
-
-
-    def test_analyze(self):
-        with mock.patch('ngi_pipeline.engines.piper_ngi.utils.CharonSession',
-                        spec=False,
-                        return_value=self.charon_mock) as dbmock:
-            analyze(self.project_obj, self.sample_obj)
-        return True
