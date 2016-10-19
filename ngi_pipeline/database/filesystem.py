@@ -4,6 +4,7 @@ import os
 from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.database.classes import CharonSession, CharonError
 from ngi_pipeline.log.loggers import minimal_logger
+from ngi_pipeline.utils.filesystem import locate_chip_genotypes_for_project
 
 LOG = minimal_logger(__name__)
 
@@ -51,6 +52,8 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
         else:
             raise
     for sample in project:
+        # TODO: parse genotype files and set status only on genotyped samples instead of on all samples in project
+        genotype_status = "AVAILABLE" if project.chip_genotypes is not None else None
         if delete_existing:
             LOG.warn('Deleting existing sample "{}"'.format(sample))
             try:
@@ -64,7 +67,8 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
             LOG.info('Creating sample "{}" with analysis_status "{}"'.format(sample, analysis_status))
             charon_session.sample_create(projectid=project.project_id,
                                          sampleid=sample.name,
-                                         analysis_status=analysis_status)
+                                         analysis_status=analysis_status,
+                                         genotype_status=genotype_status)
             LOG.info('Project/sample "{}/{}" created in Charon.'.format(project, sample))
         except CharonError as e:
             if e.status_code == 400:
@@ -73,7 +77,8 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                              'sample "{}"'.format(project, sample))
                     charon_session.sample_update(projectid=project.project_id,
                                                  sampleid=sample.name,
-                                                 analysis_status=analysis_status)
+                                                 analysis_status=analysis_status,
+                                                 genotype_status=genotype_status)
                     LOG.info('Project/sample "{}/{}" updated in Charon.'.format(project, sample))
                 else:
                     LOG.info('Project "{}" / sample "{}" already exists; moving '
@@ -170,7 +175,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                         LOG.error(e)
                         continue
 
-    if update_failed :
+    if update_failed:
         if retry_on_fail:
             create_charon_entries_from_project(project, best_practice_analysis=best_practice_analysis,
                                        sequencing_facility=sequencing_facility,
@@ -181,10 +186,17 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
 
 def recreate_project_from_db(analysis_top_dir, project_name, project_id):
     project_dir = os.path.join(analysis_top_dir, "DATA", project_name)
+    # locate chip genotype files and recreate the chip_genotypes based on those
+    chip_genotype_files = locate_chip_genotypes_for_project(
+        project_name,
+        config={'qc': {'chip_genotypes_root': [os.path.join(analysis_top_dir, "DATA")]}})
     project_obj = NGIProject(name=project_name,
                              dirname=project_name,
                              project_id=project_id,
-                             base_path=analysis_top_dir)
+                             base_path=analysis_top_dir,
+                             chip_genotypes=map(
+                                 lambda f: NGIChipGenotypes(name=os.path.basename(f)),
+                                 chip_genotype_files) if chip_genotype_files is not None else None)
     charon_session = CharonSession()
     try:
         samples_dict = charon_session.project_get_samples(project_id)["samples"]
