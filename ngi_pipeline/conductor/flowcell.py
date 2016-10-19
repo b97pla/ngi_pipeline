@@ -274,7 +274,22 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                                          chip_genotype_files) if chip_genotype_files is not None else None)
             projects_to_analyze[project_dir] = project_obj
 
-        #### TODO: symlink chip genotypes
+        # Create symlinks to chip genotype files in the project data dir
+        if create_files:
+            if project_obj.chip_genotypes is not None:
+                LOG.info("Symlinking chip genotype files: [{}]".format(
+                    ", ".join(
+                        map(os.path.basename, chip_genotype_files))))
+                try:
+                    do_symlink(chip_genotype_files, project_dir)
+                except OSError:
+                    error_text = ('Could not symlink chip genotypes for project {}'.format(project_obj))
+                    LOG.error(error_text)
+                    if not config.get('quiet'):
+                        mail_analysis(project_name=project_name, level="ERROR", info_text=error_text)
+            else:
+                LOG.info("No chip genotypes to symlink")
+
         # Iterate over the samples in the project
         for sample in project.get('samples', []):
             sample_name = sample['sample_name']
