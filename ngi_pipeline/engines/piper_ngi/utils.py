@@ -42,28 +42,103 @@ def launch_piper_job(command_line, project, log_file_path=None):
     return popen_object
 
 
-def find_previous_genotype_analyses(project_obj, sample_obj):
+def _find_existing_analysis_results(project_obj, sample_obj=None, analysis_type=None):
+    """
+    Business logic for locating pre-existing analysis results on disk.
+
+    :param NGIProject project_obj: The NGIProject object with relevant NGISamples
+    :param NGISample sample_obj: The relevant NGISample object
+    :param str analysis_type: Indicating the analysis type to search for. Possible values: all, genotype, variantcall
+        default is "all"
+    :return: A list of paths to located pre-existing analysis results
+    :rtype list:
+    :raises TypeError: if an invalid analysis_type is specified
+    """
+    analysis_type = analysis_type or "all"
+    if analysis_type not in ["all", "genotype", "variantcall"]:
+        raise TypeError("{} is not a valid analysis type to locate results for".format(analysis_type))
+
     project_dir_path = os.path.join(project_obj.base_path, "ANALYSIS",
                                     project_obj.project_id, "piper_ngi")
-    project_dir_pattern = os.path.join(project_dir_path, "??_genotype_concordance")
-    LOG.debug("Searching for previous genotype analysis output files in "
-              "{}".format(project_dir_path))
+    project_dir_pattern = os.path.join(project_dir_path, "[0123456789][0123456789]_*")
+    LOG.debug("Searching for previous {} analysis output files in "
+              "{}".format(analysis_type, project_dir_path))
 
-    # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-    sample_files = []
-    piper_sample_name = sample_obj.name.replace("_", "[_-]", 1)
-    sample_files.extend(glob.glob(os.path.join(project_dir_pattern, "{}.*".format(piper_sample_name))))
-    sample_files.extend(glob.glob(os.path.join(project_dir_pattern, ".{}.*".format(piper_sample_name))))
+    analysis_result_files = []
+    for sample in project_obj:
+        # skip if a specific sample is requested
+        if sample_obj and sample.name != sample_obj.name:
+            continue
+        analysis_result_files.extend(
+            glob.glob(os.path.join(project_dir_pattern,
+                                   "{}.*".format(sample.name))))
+        # include the hidden files as well
+        analysis_result_files.extend(
+            glob.glob(os.path.join(project_dir_pattern,
+                                   ".{}.*".format(sample.name))))
 
-    sample_valid_files = []
-    for sample_file in sample_files:
-        sample_dirname, sample_basename = os.path.split(sample_file)
-        if os.path.join(sample_dirname, ".{}.done".format(sample_basename)) in sample_files:
-            sample_valid_files.append(sample_file)
-    if sample_valid_files:
-        return True
-    else:
-        return False
+    def _piper_output_dir(output_file):
+        return os.path.relpath(output_file, project_dir_path).split(os.sep)[0]
+
+    # filter the analysis result files based on analysis_type and return the list
+    return filter(lambda x: analysis_type == "all" or (
+        _piper_output_dir(x).endswith("genotype_concordance") and analysis_type == "genotype") or (
+        not _piper_output_dir(x).endswith("genotype_concordance") and analysis_type == "variantcall"),
+                  analysis_result_files)
+
+
+def _remove_existing_analysis_results(project_obj, sample_obj=None, analysis_type=None):
+    analysis_result_files = _find_existing_analysis_results(
+        project_obj,
+        sample_obj=sample_obj,
+        analysis_type=analysis_type)
+    LOG.info("Deleting {} files for samples {}".format(
+        analysis_type or "all",
+        ", ".join(project_obj.samples)))
+    for analysis_result_file in analysis_result_files:
+        LOG.debug("Deleting file {}".format(analysis_result_file))
+        try:
+            if os.path.isdir(analysis_result_file):
+                shutil.rmtree(analysis_result_file)
+            else:
+                os.remove(analysis_result_file)
+        except OSError as e:
+            LOG.warn("Error when removing {}: {}".format(analysis_result_file, e))
+    if not analysis_result_files:
+        LOG.debug("No {} analysis files found to delete for project {} / samples {}".format(
+            project_obj,
+            ", ".join(project_obj.samples)))
+
+
+def find_previous_genotype_analyses(project_obj, sample_obj):
+    analysis_result_files = _find_existing_analysis_results(
+        project_obj,
+        analysis_type="genotype",
+        sample_obj=sample_obj)
+    return any((
+        os.path.exists(
+            os.path.join(
+                os.path.dirname(
+                    ar_file),
+                ".{}.done".format(
+                    os.path.basename(
+                        ar_file)))) for ar_file in analysis_result_files))
+
+
+def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype_files=False):
+    """Find analysis results for a sample, including .failed and .done files.
+    Doesn't throw an error if it can't read a directory.
+
+    :param NGIProject project_obj: The NGIProject object with relevant NGISamples
+    :param bool include_genotype_files: Include genotyping files (default False)
+
+    :returns: A list of files
+    :rtype: list
+    """
+    return _find_existing_analysis_results(
+        project_obj,
+        analysis_type="all" if include_genotype_files else "variantcall",
+        sample_obj=sample_obj)
 
 
 def remove_previous_genotype_analyses(project_obj):
@@ -77,34 +152,7 @@ def remove_previous_genotype_analyses(project_obj):
     :returns: Nothing
     :rtype: None
     """
-    project_dir_path = os.path.join(project_obj.base_path, "ANALYSIS",
-                                    project_obj.project_id, "piper_ngi")
-    project_dir_pattern = os.path.join(project_dir_path, "??_genotype_concordance")
-    LOG.info('deleting previous analysis in {}'.format(project_dir_path))
-    sample_files = []
-    for sample in project_obj:
-        # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-        piper_sample_name = sample.name.replace("_", "[_-]", 1)
-        sample_files.extend(glob.glob(os.path.join(project_dir_pattern, "{}.*".format(piper_sample_name))))
-        sample_files.extend(glob.glob(os.path.join(project_dir_pattern, ".{}.*".format(piper_sample_name))))
-    if sample_files:
-        LOG.info('Deleting genotype files for samples {} under '
-                 '{}'.format(", ".join(project_obj.samples), project_dir_path))
-        errors = []
-        for sample_file in sample_files:
-            LOG.debug("Deleting file {}".format(sample_file))
-            try:
-                if os.path.isdir(sample_file):
-                    shutil.rmtree(sample_file)
-                else:
-                    os.remove(sample_file)
-            except OSError as e:
-                errors.append("{}: {}".format(sample_file, e))
-        if errors:
-            LOG.warn("Error when removing one or more files: {}".format("\n".join(errors)))
-    else:
-        LOG.debug('No genotype analysis files found to delete for project {} '
-                  '/ samples {}'.format(project_obj, ", ".join(project_obj.samples)))
+    _remove_existing_analysis_results(project_obj, analysis_type="genotype")
 
 
 def remove_previous_sample_analyses(project_obj, sample_obj=None):
@@ -118,91 +166,7 @@ def remove_previous_sample_analyses(project_obj, sample_obj=None):
     :returns: Nothing
     :rtype: None
     """
-    sample_files = find_previous_sample_analyses(project_obj, sample_obj=sample_obj, include_genotype_files=False)
-    if sample_files:
-        LOG.info("Deleting files for samples {}".format(sample_obj or project_obj.samples))
-        errors = []
-        for sample_file in sample_files:
-            LOG.info("Deleting file {}".format(sample_file))
-            try:
-                if os.path.isdir(sample_file):
-                    shutil.rmtree(sample_file)
-                else:
-                    os.remove(sample_file)
-            except OSError as e:
-                errors.append("{}: {}".format(sample_file, e))
-        if errors:
-            LOG.warn("Error when removing one or more files: {}".format("\n".join(errors)))
-    else:
-        LOG.debug('No sample analysis files found to delete for project {} '
-                  '/ samples {}'.format(project_obj, ", ".join(project_obj.samples)))
-
-
-def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype_files=False):
-    """Find analysis results for a sample, including .failed and .done files.
-    Doesn't throw an error if it can't read a directory.
-
-    :param NGIProject project_obj: The NGIProject object with relevant NGISamples
-    :param bool include_genotype_files: Include genotyping files (default False)
-
-    :returns: A list of files
-    :rtype: list
-    """
-    sample_files = set() # This isn't really necessary but scoping makes me want to do it
-    project_dir_path = os.path.join(project_obj.base_path, "ANALYSIS",
-                                    project_obj.project_id, "piper_ngi")
-    project_dir_pattern = os.path.join(project_dir_path, "??_*")
-    for sample in project_obj:
-        if sample_obj and sample.name != sample_obj.name:
-            continue
-        # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-        piper_sample_name = sample.name.replace("_", "[_-]", 1)
-        sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                              "{}.*".format(piper_sample_name))))
-        sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                                   ".{}.*".format(piper_sample_name))))
-    # Include genotype files?
-    if not include_genotype_files:
-        sample_files = filter(lambda x: not fnmatch.fnmatch(x, "*genotype_concordance*"),
-                              sample_files)
-
-    return sample_files
-
-def rotate_previous_analysis(project_obj):
-    """Rotates the files from the existing analysis starting at 03_merged_aligments"""
-    project_dir_path = os.path.join(project_obj.base_path, "ANALYSIS",
-                                    project_obj.project_id, "piper_ngi")
-    #analysis_move = glob.glob(os.path.join(project_dir_path, '0[3-9]_*'))
-    for sample in project_obj:
-        # P123_456 is renamed by Piper to P123-456
-        piper_sample_name = sample.name.replace("_", "-", 1)
-        sample_files = glob.glob(os.path.join(project_dir_path, "0[3-9]_*", "{}.*".format(piper_sample_name)))
-        if sample_files:
-            LOG.info('Rotating files for sample {} under {} to '
-                     '"previous_analyses" folder'.format(sample, project_dir_path))
-            current_datetime = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S:%f")
-            for sample_file in sample_files:
-                # This will be the project_dir_path, so I guess I'm just being paranoid
-                common_prefix = os.path.commonprefix([os.path.abspath(project_dir_path),
-                                                      os.path.abspath(sample_file)])
-                # This part of the directory tree we need to recreate under previous_analyses
-                # So e.g. with
-                #       /proj/a2015001/Y.Mom_15_01/01_raw_alignments/P123_456.bam
-                # we'd get
-                #       01_raw_alignments/P123_456.bam
-                # and we'd then create
-                #       /proj/a2015001/Y.Mom_15_01/previous_analyses/2015-02-19_16:24:12:640314/01_raw_alignments/
-                # and move the file to this directory.
-                leaf_path = os.path.relpath(sample_file, common_prefix)
-                leaf_base, filename = os.path.split(leaf_path)
-                previous_analysis_dirpath = os.path.join(common_prefix,
-                                                         "previous_analyses",
-                                                         current_datetime,
-                                                         leaf_base)
-                safe_makedir(previous_analysis_dirpath, mode=0o2770)
-                LOG.debug("Moving file {} to directory {}".format(sample_file,
-                                                                  previous_analysis_dirpath))
-                shutil.move(sample_file, previous_analysis_dirpath)
+    _remove_existing_analysis_results(project_obj, sample_obj=sample_obj, analysis_type="variantcall")
 
 
 def get_finished_seqruns_for_sample(project_id, sample_id,

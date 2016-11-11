@@ -29,8 +29,8 @@ from ngi_pipeline.engines.piper_ngi.utils import check_for_preexisting_sample_ru
                                                  launch_piper_job, \
                                                  record_analysis_details, \
                                                  remove_previous_genotype_analyses, \
-                                                 remove_previous_sample_analyses, \
-                                                 rotate_previous_analysis
+                                                 remove_previous_sample_analyses
+
 
 from ngi_pipeline.log.loggers import log_process_non_blocking, minimal_logger
 from ngi_pipeline.utils.filesystem import load_modules, execute_command_line, \
