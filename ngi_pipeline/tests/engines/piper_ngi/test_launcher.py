@@ -65,7 +65,7 @@ class TestAnalyze(unittest.TestCase):
 
     @mock.patch('ngi_pipeline.engines.piper_ngi.launchers.check_for_preexisting_sample_runs', side_effect=RuntimeError)
     def test_running_sample(self, *args):
-        """ A sample that shouldn't be restarted should raise a RuntileError """
+        """ A sample that shouldn't be restarted should raise a RuntimeError """
         with self.assertRaises(RuntimeError):
             analyze("some", "value")
 
@@ -101,7 +101,7 @@ class TestAnalyze(unittest.TestCase):
     @mock.patch('ngi_pipeline.engines.piper_ngi.launchers.find_previous_genotype_analyses')
     @mock.patch('ngi_pipeline.engines.piper_ngi.launchers.is_sample_analysis_running_local', side_effect=AssertionError)
     def test_genotype_restarting(self, run_local, gt_analyses_mock, *args):
-        """ A Charon error for a sample should result in skipping of that sample """
+        """ Whether to restart a sample or skip it should be handled appropriately """
         charon_mock = mock.Mock()
         charon_mock.sample_get = mock.Mock()
         with mock.patch('ngi_pipeline.engines.piper_ngi.launchers.CharonSession', return_value=charon_mock):

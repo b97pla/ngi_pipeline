@@ -48,27 +48,17 @@ def find_previous_genotype_analyses(project_obj, sample_obj):
     project_dir_pattern = os.path.join(project_dir_path, "??_genotype_concordance")
     LOG.debug("Searching for previous genotype analysis output files in "
               "{}".format(project_dir_path))
-    piper_sample_name = sample_obj.name.replace("_", "-", 1)
-    sample_files = glob.glob(os.path.join(project_dir_pattern,
-                                          "{}*".format(sample_obj.name)))
-    # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-    sample_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                               "{}*".format(piper_sample_name))))
 
-    sample_done_files = glob.glob(os.path.join(project_dir_pattern,
-                                  ".{}*.done".format(sample_obj.name)))
-    sample_done_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                  ".{}*.done".format(piper_sample_name))))
-    sample_failed_files = glob.glob(os.path.join(project_dir_pattern,
-                                  ".{}*.failed".format(sample_obj.name)))
-    sample_failed_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                  ".{}*.failed".format(piper_sample_name))))
+    # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
+    sample_files = []
+    piper_sample_name = sample_obj.name.replace("_", "[_-]", 1)
+    sample_files.extend(glob.glob(os.path.join(project_dir_pattern, "{}.*".format(piper_sample_name))))
+    sample_files.extend(glob.glob(os.path.join(project_dir_pattern, ".{}.*".format(piper_sample_name))))
+
     sample_valid_files = []
     for sample_file in sample_files:
         sample_dirname, sample_basename = os.path.split(sample_file)
-        sample_done_name = os.path.join(sample_dirname,
-                                        ".{}.done".format(sample_basename))
-        if sample_done_name in sample_done_files:
+        if os.path.join(sample_dirname, ".{}.done".format(sample_basename)) in sample_files:
             sample_valid_files.append(sample_file)
     if sample_valid_files:
         return True
@@ -91,17 +81,12 @@ def remove_previous_genotype_analyses(project_obj):
                                     project_obj.project_id, "piper_ngi")
     project_dir_pattern = os.path.join(project_dir_path, "??_genotype_concordance")
     LOG.info('deleting previous analysis in {}'.format(project_dir_path))
+    sample_files = []
     for sample in project_obj:
-        piper_sample_name = sample.name.replace("_", "-", 1)
-        sample_files = glob.glob(os.path.join(project_dir_pattern,
-                                              "{}*".format(sample.name)))
         # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-        sample_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                      "{}*".format(piper_sample_name))))
-        sample_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                      ".{}*.done".format(piper_sample_name))))
-        sample_files.extend(glob.glob(os.path.join(project_dir_pattern,
-                                      ".{}*.failed".format(piper_sample_name))))
+        piper_sample_name = sample.name.replace("_", "[_-]", 1)
+        sample_files.extend(glob.glob(os.path.join(project_dir_pattern, "{}.*".format(piper_sample_name))))
+        sample_files.extend(glob.glob(os.path.join(project_dir_pattern, ".{}.*".format(piper_sample_name))))
     if sample_files:
         LOG.info('Deleting genotype files for samples {} under '
                  '{}'.format(", ".join(project_obj.samples), project_dir_path))
@@ -135,7 +120,7 @@ def remove_previous_sample_analyses(project_obj, sample_obj=None):
     """
     sample_files = find_previous_sample_analyses(project_obj, sample_obj=sample_obj, include_genotype_files=False)
     if sample_files:
-        LOG.info("Deleting files for samples {}".format(sample_obj or project.obj.samples))
+        LOG.info("Deleting files for samples {}".format(sample_obj or project_obj.samples))
         errors = []
         for sample_file in sample_files:
             LOG.info("Deleting file {}".format(sample_file))
@@ -170,16 +155,12 @@ def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype
     for sample in project_obj:
         if sample_obj and sample.name != sample_obj.name:
             continue
-        sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                              "{}.*".format(sample.name))))
         # P123_456 is renamed by Piper to P123-456? Sometimes? Always?
-        piper_sample_name = sample.name.replace("_", "?", 1)
+        piper_sample_name = sample.name.replace("_", "[_-]", 1)
         sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                                   "{}.*".format(piper_sample_name))))
+                                              "{}.*".format(piper_sample_name))))
         sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                                   ".{}.*.done".format(piper_sample_name))))
-        sample_files.update(glob.glob(os.path.join(project_dir_pattern,
-                                                   ".{}.*.fail".format(piper_sample_name))))
+                                                   ".{}.*".format(piper_sample_name))))
     # Include genotype files?
     if not include_genotype_files:
         sample_files = filter(lambda x: not fnmatch.fnmatch(x, "*genotype_concordance*"),

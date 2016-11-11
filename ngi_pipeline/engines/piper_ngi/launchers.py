@@ -131,11 +131,9 @@ def analyze(project, sample,
                 if level == "sample":
                     if not keep_existing_data:
                         remove_previous_sample_analyses(project, sample)
-                        default_files_to_copy=None
                 elif level == "genotype":
                     if not keep_existing_data:
                         remove_previous_genotype_analyses(project)
-                        default_files_to_copy=None
 
                 # Update the project to keep only valid fastq files for setup.xml creation
                 if level == "genotype":
@@ -243,6 +241,12 @@ def collect_files_for_sample_analysis(project_obj, sample_obj,
         raise ValueError('No valid libpreps/seqruns found for project/sample '
                          '"{}/{}"'.format(project_obj, sample_obj))
 
+    # Locate genotype files under the project data directory
+    project_data_directory = os.path.join(project_obj.base_path, "DATA", project_obj.dirname)
+    chip_genotype_files = filter(
+        lambda f: f.endswith(".vcf") or f.endswith(".vcf.gz"),
+        glob.glob(os.path.join(project_data_directory, "*.vcf*")))
+
     # Now we find all fastq files that are available and validate them against
     # the group compiled in the previous step (get_valid_seqruns_for_sample)
     # We're going to recreate NGIProject/NGISample/NGILibraryPrep/NGISeqrun objects here
@@ -255,7 +259,11 @@ def collect_files_for_sample_analysis(project_obj, sample_obj,
 
     # Create a new NGIProject object (the old one could still be in use elsewhere)
     proj_obj = NGIProject(project_obj.name, project_obj.dirname,
-                          project_obj.project_id, project_obj.base_path)
+                          project_obj.project_id, project_obj.base_path,
+                          chip_genotypes=map(
+                              lambda f: NGIChipGenotypes(
+                                  name=os.path.basename(f)),
+                              chip_genotype_files) if chip_genotype_files is not None else None)
     sample_obj = proj_obj.add_sample(sample_obj.name, sample_obj.dirname)
     for fastq_path in fastq_files_on_filesystem:
         base_path, fastq = os.path.split(fastq_path)
@@ -276,7 +284,7 @@ def collect_files_for_sample_analysis(project_obj, sample_obj,
     ### EXISTING DATA
     # If we still have data here at this point, we'll copy it over. If we had
     # decided to scrap it, it would have been deleted already.
-    files_to_copy = find_previous_sample_analyses(proj_obj, sample_obj)
+    files_to_copy = find_previous_sample_analyses(proj_obj, sample_obj, include_genotype_files=True)
 
     return (proj_obj, files_to_copy)
 
