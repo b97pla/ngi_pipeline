@@ -169,8 +169,54 @@ def remove_previous_sample_analyses(project_obj, sample_obj=None):
     _remove_existing_analysis_results(project_obj, sample_obj=sample_obj, analysis_type="variantcall")
 
 
+def _get_libpreps_for_sample(project_id, sample_id, status_field):
+
+    valid_status_values = ("alignment_status", "genotype_status",)
+    if status_field not in valid_status_values:
+        raise ValueError('"status_field" argument must be one of {} '
+                         '(value passed was "{}")'.format(", ".join(valid_status_values), status_field))
+    libpreps = []
+    charon_session = CharonSession()
+    for libprep in charon_session.sample_get_libpreps(projectid=project_id, sampleid=sample_id).get("libpreps", []):
+        libprepid = libprep["libprepid"]
+        seqruns = []
+        for seqrun in charon_session.libprep_get_seqruns(
+                projectid=project_id,
+                sampleid=sample_id,
+                libprepid=libprepid).get("seqruns", []):
+            seqrunid = seqrun["seqrunid"]
+            seqrun_entry = charon_session.seqrun_get(
+                    projectid=project_id,
+                    sampleid=sample_id,
+                    libprepid=libprepid,
+                    seqrunid=seqrunid)
+            if status_field not in seqrun_entry:
+                LOG.error("Field \"{}\" not available for seqrun \"{}\" in Charon for project \"{}\" / sample \"{}\". "
+                          "Including as valid.".format(status_field, seqrunid, project_id, sample_id))
+            seqruns.append({
+                "seqrunid": seqrunid,
+                status_field: seqrun_entry.get(status_field)})
+        libpreps.append({
+            "libprepid": libprepid,
+            "qc": libprep.get("qc"),
+            "seqruns": seqruns
+        })
+    return libpreps
+
+
+def _filter_libpreps_for_sample(libpreps, include_failed_libpreps=False):
+    def _do_filter(libprep):
+        if include_failed_libpreps or libprep.get("qc") != "FAILED":
+            return True
+        LOG.info('Skipping libprep "{}" due to qc status "{}"'.format(libprep.get("libprepid"), libprep.get("qc")))
+        return False
+
+    return filter(_do_filter, libpreps)
+
+
 def get_finished_seqruns_for_sample(project_id, sample_id,
-                                    include_failed_libpreps=False):
+                                    include_failed_libpreps=False,
+                                    status_field="alignment_status"):
     """Find all the finished seqruns for a particular sample.
 
     :param str project_id: The id of the project
@@ -179,30 +225,28 @@ def get_finished_seqruns_for_sample(project_id, sample_id,
     :returns: A dict of {libprep_01: [seqrun_01, ..., seqrun_nn], ...}
     :rtype: dict
     """
-    charon_session = CharonSession()
-    sample_libpreps = charon_session.sample_get_libpreps(projectid=project_id,
-                                                         sampleid=sample_id)
-    libpreps = collections.defaultdict(list)
-    for libprep in sample_libpreps['libpreps']:
-        if libprep.get('qc') != "FAILED" or include_failed_libpreps:
-            libprep_id = libprep['libprepid']
-            for seqrun in charon_session.libprep_get_seqruns(projectid=project_id,
-                                                             sampleid=sample_id,
-                                                             libprepid=libprep_id)['seqruns']:
-                seqrun_id = seqrun['seqrunid']
-                aln_status = charon_session.seqrun_get(projectid=project_id,
-                                                       sampleid=sample_id,
-                                                       libprepid=libprep_id,
-                                                       seqrunid=seqrun_id).get('alignment_status')
-                if aln_status == "DONE":
-                    libpreps[libprep_id].append(seqrun_id)
-                else:
-                    LOG.debug('Skipping seqrun "{}" due to alignment_status '
-                              '"{}"'.format(seqrun_id, aln_status))
-        else:
-            LOG.info('Skipping libprep "{}" due to qc status '
-                     '"{}"'.format(libprep, libprep.get("qc")))
-    return dict(libpreps)
+
+    def _seqrun_filter(seqrun):
+        if seqrun.get(status_field) == "DONE":
+            return True
+        LOG.info("Skipping seqrun \"{}\" due to {} \"{}\"".format(
+            seqrun.get("seqrunid"), status_field, seqrun.get(status_field)))
+        return False
+
+    # filter failed libpreps if specified
+    libpreps = _filter_libpreps_for_sample(
+        _get_libpreps_for_sample(project_id, sample_id, status_field),
+        include_failed_libpreps=include_failed_libpreps)
+
+    # get the seqruns that are DONE
+    valid_libpreps = {
+        libprep.get("libprepid"): [
+            seqrun.get("seqrunid") for seqrun in filter(_seqrun_filter, libprep.get("seqruns", []))]
+        for libprep in libpreps}
+
+    # only return libpreps with non-empty seqrun lists
+    return {lp: sr for lp, sr in valid_libpreps.items() if sr}
+
 
 def get_valid_seqruns_for_sample(project_id, sample_id,
                                  include_failed_libpreps=False,
@@ -220,42 +264,27 @@ def get_valid_seqruns_for_sample(project_id, sample_id,
 
     :raises ValueError: If status_field is not a valid value
     """
-    valid_status_values = ("alignment_status", "genotype_status",)
-    if status_field not in valid_status_values:
-        raise ValueError('"status_field" argument must be one of {} '
-                         '(value passed was "{}")'.format(", ".join(valid_status_values),
-                                                          status_field))
-    charon_session = CharonSession()
-    sample_libpreps = charon_session.sample_get_libpreps(projectid=project_id,
-                                                         sampleid=sample_id)
-    libpreps = collections.defaultdict(list)
-    for libprep in sample_libpreps['libpreps']:
-        if libprep.get('qc') != "FAILED" or include_failed_libpreps:
-            libprep_id = libprep['libprepid']
-            for seqrun in charon_session.libprep_get_seqruns(projectid=project_id,
-                                                             sampleid=sample_id,
-                                                             libprepid=libprep_id)['seqruns']:
-                seqrun_id = seqrun['seqrunid']
-                try:
-                    aln_status = charon_session.seqrun_get(projectid=project_id,
-                                                           sampleid=sample_id,
-                                                           libprepid=libprep_id,
-                                                           seqrunid=seqrun_id)[status_field]
-                except KeyError:
-                    LOG.error('Field "{}" not available for seqrun "{}" in Charon '
-                              'for project "{}" / sample "{}". Including as '
-                              'valid.'.format(status_field, seqrun_id,
-                                              project_id, sample_id))
-                    aln_status = None
-                if aln_status != "DONE" or include_done_seqruns:
-                    libpreps[libprep_id].append(seqrun_id)
-                else:
-                    LOG.info('Skipping seqrun "{}" due to {}'
-                             '"{}"'.format(seqrun_id,status_field, aln_status))
-        else:
-            LOG.info('Skipping libprep "{}" due to qc status '
-                     '"{}"'.format(libprep, libprep.get("qc")))
-    return dict(libpreps)
+
+    def _seqrun_filter(seqrun):
+        if include_done_seqruns or seqrun.get(status_field) != "DONE":
+            return True
+        LOG.info("Skipping seqrun \"{}\" due to {} \"{}\"".format(
+            seqrun.get("seqrunid"), status_field, seqrun.get(status_field)))
+        return False
+
+    # filter failed libpreps if specified
+    libpreps = _filter_libpreps_for_sample(
+        _get_libpreps_for_sample(project_id, sample_id, status_field),
+        include_failed_libpreps=include_failed_libpreps)
+
+    # get the seqruns that are not DONE
+    valid_libpreps = {
+        libprep.get("libprepid"): [
+            seqrun.get("seqrunid") for seqrun in filter(_seqrun_filter, libprep.get("seqruns", []))]
+        for libprep in libpreps}
+
+    # only return libpreps with non-empty seqrun lists
+    return {lp: sr for lp, sr in valid_libpreps.items() if sr}
 
 
 def record_analysis_details(project, job_identifier):
@@ -313,29 +342,22 @@ def check_for_preexisting_sample_runs(project_obj, sample_obj,
 
     :raise RuntimeError if the status is RUNNING or DONE and the flags do not allow to continue
     """
-    project_id = project_obj.project_id
-    sample_id = sample_obj.name
-    charon_session = CharonSession()
-    sample_libpreps = charon_session.sample_get_libpreps(projectid=project_id,
-                                                         sampleid=sample_id)
-    for libprep in sample_libpreps['libpreps']:
-        libprep_id = libprep['libprepid']
-        for seqrun in charon_session.libprep_get_seqruns(projectid=project_id,
-                                                         sampleid=sample_id,
-                                                         libprepid=libprep_id)['seqruns']:
-            seqrun_id = seqrun['seqrunid']
-            aln_status = charon_session.seqrun_get(projectid=project_id,
-                                                   sampleid=sample_id,
-                                                   libprepid=libprep_id,
-                                                   seqrunid=seqrun_id).get(status_field)
-            if ((aln_status == "RUNNING" or aln_status == "UNDER_ANALYSIS") and \
-                not restart_running_jobs) or \
-                (aln_status == "DONE" and not restart_finished_jobs):
-                raise RuntimeError('Project/Sample "{}/{}" has a preexisting '
-                                   'seqrun "{}" with status "{}"'.format(project_obj,
-                                                                         sample_obj,
-                                                                         seqrun_id,
-                                                                         aln_status))
+
+    def _seqrun_map(seqrun):
+        status = seqrun.get(status_field)
+        if (status in ("RUNNING", "UNDER_ANALYSIS") and not restart_running_jobs) or (
+            status == "DONE" and not restart_finished_jobs):
+            raise RuntimeError('Project/Sample "{}/{}" has a preexisting '
+                               'seqrun "{}" with status "{}"'.format(project_obj,
+                                                                     sample_obj,
+                                                                     seqrun.get("seqrunid"),
+                                                                     status))
+
+    # get libpreps
+    libpreps = _get_libpreps_for_sample(project_obj.project_id, sample_obj.name, status_field)
+
+    # get the seqruns that are ok to start
+    map(lambda x: map(_seqrun_map, x.get("seqruns", [])), libpreps)
 
 
 SBATCH_HEADER = """#!/bin/bash -l
