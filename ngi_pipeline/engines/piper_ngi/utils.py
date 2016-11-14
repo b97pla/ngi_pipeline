@@ -328,7 +328,7 @@ def check_for_preexisting_sample_runs(project_obj, sample_obj,
                                                    sampleid=sample_id,
                                                    libprepid=libprep_id,
                                                    seqrunid=seqrun_id).get(status_field)
-            if (aln_status == "RUNNING" or aln_status == "UNDER_ANALYSIS" and \
+            if ((aln_status == "RUNNING" or aln_status == "UNDER_ANALYSIS") and \
                 not restart_running_jobs) or \
                 (aln_status == "DONE" and not restart_finished_jobs):
                 raise RuntimeError('Project/Sample "{}/{}" has a preexisting '
