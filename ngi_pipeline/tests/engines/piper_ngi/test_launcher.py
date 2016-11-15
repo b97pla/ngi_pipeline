@@ -6,9 +6,13 @@ import os
 from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.database.classes import CharonError
 from ngi_pipeline.engines.piper_ngi.launchers import analyze
+from ngi_pipeline.tests.engines.piper_ngi.test_utils import ProjectData
 
 
 class TestAnalyze(unittest.TestCase):
+
+    def setUp(self):
+        self.project_data = ProjectData()
 
     @classmethod
     def setUpClass(cls):

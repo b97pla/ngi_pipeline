@@ -1,53 +1,337 @@
 """The Piper automated launcher script."""
 from __future__ import print_function
 
-import collections
-import glob
 import os
 import re
-import shlex
-import shutil
 import subprocess
+import sys
 import time
-import datetime
 
-from ngi_pipeline.conductor.classes import NGIProject
-from ngi_pipeline.database.classes import CharonSession, CharonError
-from ngi_pipeline.engines.piper_ngi import workflows
-from ngi_pipeline.engines.piper_ngi.command_creation_config import build_piper_cl, \
-                                                                   build_setup_xml
-from ngi_pipeline.engines.piper_ngi.local_process_tracking import is_sample_analysis_running_local, \
-                                                                  kill_running_sample_analysis, \
-                                                                  record_process_sample
-from ngi_pipeline.engines.piper_ngi.utils import check_for_preexisting_sample_runs, \
-                                                 create_exit_code_file_path, \
-                                                 create_log_file_path, \
-                                                 create_sbatch_header, \
-                                                 find_previous_genotype_analyses, \
-                                                 find_previous_sample_analyses, \
-                                                 get_valid_seqruns_for_sample, \
-                                                 launch_piper_job, \
-                                                 record_analysis_details, \
-                                                 remove_previous_genotype_analyses, \
-                                                 remove_previous_sample_analyses
-
-
-from ngi_pipeline.log.loggers import log_process_non_blocking, minimal_logger
-from ngi_pipeline.utils.filesystem import load_modules, execute_command_line, \
-                                          rotate_file, safe_makedir, \
-                                          match_files_under_dir
-from ngi_pipeline.utils.classes import with_ngi_config
-from ngi_pipeline.utils.filesystem import fastq_files_under_dir
-from ngi_pipeline.utils.parsers import parse_lane_from_filename, \
-                                       find_fastq_read_pairs_from_dir, \
-                                       get_flowcell_id_from_dirtree
-from ngi_pipeline.utils.slurm import get_slurm_job_status
+from ngi_pipeline.conductor.classes import NGIProject, NGIChipGenotypes
+from ngi_pipeline.engines.piper_ngi import command_creation_config, local_process_tracking, workflows
+from ngi_pipeline.engines.piper_ngi import utils as sample_runs_handler
+from ngi_pipeline.log.loggers import minimal_logger
+from ngi_pipeline.utils import classes, filesystem, slurm
 
 LOG = minimal_logger(__name__)
 
-@with_ngi_config
+
+class PiperLauncher(object):
+
+    def __init__(self,
+                 project_obj,
+                 sample_obj,
+                 restart_finished_jobs=False,
+                 restart_running_jobs=False,
+                 keep_existing_data=False,
+                 generate_bqsr_bam=False,
+                 level="sample",
+                 config=None,
+                 **kwargs):
+
+        # set fields passed as arguments
+        self.project_obj = project_obj
+        self.sample_obj = sample_obj
+        self.restart_finished_jobs = restart_finished_jobs
+        self.restart_running_jobs = restart_running_jobs
+        self.keep_existing_data = keep_existing_data
+        self.generate_bqsr_bam = generate_bqsr_bam
+        self.level = level
+        self.config = config
+
+        # set default fields if not passed
+        self.exec_mode = kwargs.get("exec_mode", "sbatch")
+        # dependency injection stuff
+        self.workflow_handler = kwargs.get("workflow_handler", workflows)
+        self.local_process_tracking_handler = kwargs.get("local_process_tracking_handler", local_process_tracking)
+        self.preexisting_sample_runs_handler = kwargs.get("preexisting_sample_runs_handler", sample_runs_handler)
+        self.sample_runs_handler = kwargs.get("sample_runs_handler", sample_runs_handler)
+        self.filesystem_handler = kwargs.get("filesystem_handler", filesystem)
+        self.command_handler = kwargs.get("command_handler", command_creation_config)
+        self.launch_handler = kwargs.get("launch_handler", sys.modules[__name__])
+        self.slurm_handler = kwargs.get("slurm_handler", slurm)
+
+        # set derived fields
+        self.status_field = "alignment_status" if self.level == "sample" else "genotype_status"
+        self.project_data_directory = os.path.join(self.project_obj.base_path, "DATA", self.project_obj.dirname)
+        self.sample_data_directory = os.path.join(self.project_data_directory, self.sample_obj.dirname)
+
+    def analyze(self):
+        # get the list of workflow subtasks to perform
+        workflow_subtasks = self.determine_workflow_subtasks()
+
+        # assert that we support the exec_mode (e.g. sbatch or local)
+        try:
+            self.assert_exec_mode()
+        except NotImplementedError as ne:
+            LOG.error('Processing project "{}" / sample "{}" / workflow "{}" failed: {}'.format(
+                self.project_obj,
+                self.sample_obj,
+                ",".join(workflow_subtasks),
+                ne))
+            return False
+
+        # assert that the sample is ok to be started (this will raise an exception if that's not the case)
+        try:
+            self.assert_sample_should_be_started()
+        except RuntimeError:
+            raise
+
+        # iterate over the workflow subtasks and start them, cleaning up as we go
+        for workflow_subtask in workflow_subtasks:
+            # assert that a workflow subtask is not running on the sample at this point,
+            # and if it is, that it is killed if that's desired. otherwise skip this sample
+            if not self.assert_sample_is_not_running(workflow_subtask):
+                continue
+
+            LOG.info('Launching "{}" analysis for sample "{}" in project "{}"'.format(
+                workflow_subtask, self.sample_obj, self.project_obj))
+
+            # clean up previous analysis results for this sample
+            self.clean_previous_analysis_results()
+
+            # determine the libpreps and seqruns that should be included in the analysis
+            try:
+                libpreps_seqruns = self.determine_seqruns_to_be_analyzed()
+            except RuntimeError as err:
+                LOG.error('Processing project "{}" / sample "{}" / workflow "{}" failed: {}'.format(
+                    self.project_obj, self.sample_obj, workflow_subtask, err))
+                continue
+
+            # locate the files needed for the analysis
+            try:
+                chip_genotypes_for_analysis = self.locate_chip_genotype_files_for_project()
+                fastq_files_for_analysis = self.locate_fastq_files_for_project_sample(valid_seqruns=libpreps_seqruns)
+                old_files_for_analysis = self.locate_preexisting_data_to_include_in_analysis()
+            except ValueError as ve:
+                LOG.error('Processing project "{}" / sample "{}" / workflow "{}" failed: {}'.format(
+                    self.project_obj, self.sample_obj, workflow_subtask, ve))
+                continue
+
+            # create the file paths for log and exit code
+            exit_code_path = self.create_exit_code_path(workflow_subtask)
+            log_file_path = self.create_log_file_path(workflow_subtask)
+
+            # rotate the log file
+            self.rotate_log_file(log_file_path)
+
+            # set up a local project object based on the located files to use for command creation
+            local_project_obj = self.create_local_copy_of_project_obj(
+                fastq_files_for_analysis, chip_genotypes_for_analysis)
+
+            # create the setup command and get the setup xml output path
+            setup_command, setup_xml_path = self.create_setup_command(local_project_obj, workflow_subtask)
+
+            # create the piper command
+            piper_command = self.create_piper_command(
+                local_project_obj, workflow_subtask, setup_xml_path, exit_code_path)
+
+            # submit the commands for execution
+            submitted_job_id = self.submit_commands(
+                [setup_command, piper_command], workflow_subtask, old_files_for_analysis)
+
+            # verify the job status of the submitted commands
+            try:
+                self.submitted_job_status(submitted_job_id)
+            except RuntimeError as err:
+                LOG.error('command file for sample {}/{} did not submit properly: {}'.format(
+                    self.project_obj, self.sample_obj, err))
+
+            # record the job details in the local tracking database
+            try:
+                self.record_job_status_to_databases(workflow_subtask, submitted_job_id)
+            except (RuntimeError, ValueError) as err:
+                LOG.error("error recording job status to database: {}".format(err))
+
+    def assert_exec_mode(self):
+        implemented_modes = ["sbatch"]
+        if self.exec_mode not in implemented_modes:
+            raise NotImplementedError("{} execution mode not implemented. Only {} available.".format(
+                self.exec_mode, ",".join(implemented_modes)
+            ))
+
+    def assert_sample_should_be_started(self):
+        try:
+            self.preexisting_sample_runs_handler.check_for_preexisting_sample_runs(
+                self.project_obj,
+                self.sample_obj,
+                self.restart_running_jobs,
+                self.restart_finished_jobs,
+                self.status_field)
+        except RuntimeError:
+            raise
+
+    def assert_sample_is_not_running(self, workflow_subtask):
+        if self.restart_running_jobs:
+            self.local_process_tracking_handler.kill_running_sample_analysis(
+                workflow_subtask, self.project_obj.project_id, self.sample_obj.name)
+        return not self.local_process_tracking_handler.is_sample_analysis_running_local(
+            workflow_subtask, self.project_obj.project_id, self.sample_obj.name)
+
+    def clean_previous_analysis_results(self):
+        if not self.keep_existing_data:
+            if self.level == "sample":
+                self.preexisting_sample_runs_handler.remove_previous_sample_analyses(self.project_obj, self.sample_obj)
+            else:
+                self.preexisting_sample_runs_handler.remove_previous_genotype_analyses(self.project_obj)
+
+    def create_exit_code_path(self, workflow_subtask):
+        return self.sample_runs_handler.create_exit_code_file_path(
+            workflow_subtask,
+            self.project_obj.base_path,
+            self.project_obj.dirname,
+            self.project_obj.project_id,
+            sample_id=self.sample_obj.name)
+
+    def create_local_copy_of_project_obj(self, fastq_files, chip_genotype_files):
+        # initialize the local NGIProject
+        local_project_obj = NGIProject(
+            self.project_obj.name,
+            self.project_obj.dirname,
+            self.project_obj.project_id,
+            self.project_obj.base_path,
+            chip_genotypes=map(
+                lambda f: NGIChipGenotypes(name=os.path.basename(f)),
+                chip_genotype_files) if chip_genotype_files else None)
+
+        # attach a sample object
+        local_sample_obj = local_project_obj.add_sample(
+            self.sample_obj.name,
+            self.sample_obj.dirname)
+
+        # create libpreps and seqruns based on supplied fastq files
+        for fastq_file in fastq_files:
+            # split the path backwards to get the libprep, seqrun and fastq names
+            # this reverses the full path, splits on '/', takes the first three elements and reverses them back
+            (fastq_name, seqrun_name, libprep_name) = map(
+                lambda x: x[::-1],
+                fastq_file[::-1].split(os.path.sep)[0:3])
+            local_libprep_obj = local_sample_obj.add_libprep(name=libprep_name, dirname=libprep_name)
+            local_seqrun_obj = local_libprep_obj.add_seqrun(name=seqrun_name, dirname=seqrun_name)
+            local_seqrun_obj.add_fastq_files(fastq_name)
+        return local_project_obj
+
+    def create_log_file_path(self, workflow_subtask):
+        return self.sample_runs_handler.create_log_file_path(
+            workflow_subtask,
+            self.project_obj.base_path,
+            self.project_obj.dirname,
+            self.project_obj.project_id,
+            sample_id=self.sample_obj.name)
+
+    def create_piper_command(self, local_project_obj, workflow_subtask, setup_xml_path, exit_code_path):
+        return self.command_handler.build_piper_cl(
+            project=local_project_obj,
+            workflow_name=workflow_subtask,
+            setup_xml_path=setup_xml_path,
+            exit_code_path=exit_code_path,
+            config=self.config,
+            exec_mode=self.exec_mode,
+            generate_bqsr_bam=self.generate_bqsr_bam)
+
+    def create_setup_command(self, local_project_obj, workflow_subtask):
+        return self.command_handler.build_setup_xml(
+            local_project_obj,
+            next(local_project_obj),
+            workflow_subtask,
+            self.exec_mode == "sbatch",
+            self.config
+        )
+
+    def determine_seqruns_to_be_analyzed(self, include_failed_libpreps=False):
+        valid_seqruns = self.preexisting_sample_runs_handler.get_valid_seqruns_for_sample(
+            project_id=self.project_obj.project_id,
+            sample_id=self.sample_obj.name,
+            include_failed_libpreps=include_failed_libpreps,
+            include_done_seqruns=self.restart_finished_jobs,
+            status_field=self.status_field)
+        if not valid_seqruns:
+            raise ValueError('No valid libpreps/seqruns found for project/sample "{}/{}"'.format(
+                self.project_obj, self.sample_obj))
+        return valid_seqruns
+
+    def determine_workflow_subtasks(self):
+        return self.workflow_handler.get_subtasks_for_level(level=self.level)
+
+    def locate_chip_genotype_files_for_project(self):
+        chip_genotype_files = self.filesystem_handler.locate_chip_genotypes_in_dir(self.project_data_directory)
+        return chip_genotype_files if chip_genotype_files else None
+
+    def locate_fastq_files_for_project_sample(self, realpath=False, valid_seqruns=None):
+        fastq_files = self.filesystem_handler.fastq_files_under_dir(
+            self.sample_data_directory, realpath=realpath)
+        if not fastq_files:
+            raise ValueError('No valid fastq files found for project/sample {}/{}'.format(
+                self.project_obj, self.sample_obj))
+        # flatten the valid_seqruns dict to a list of key1/val1, key1/val2 combinations
+        valid_seqrun_paths = [
+                os.path.join(libprep, seqrun)
+                for libprep, seqruns in valid_seqruns.items()
+                for seqrun in seqruns] if valid_seqruns else []
+        # filter fastq files against valid seqruns if specified,
+        # this assumes a hierarchy like .../libprep/seqrun/file.fastq.gz
+        return filter(
+            lambda fq: any(
+                map(
+                    lambda pth: os.path.split(fq)[0].endswith(pth),
+                    valid_seqrun_paths)),
+            fastq_files)
+
+    def locate_preexisting_data_to_include_in_analysis(self, include_genotype_files=True):
+        return self.preexisting_sample_runs_handler.find_previous_sample_analyses(
+            self.project_obj, self.sample_obj,  include_genotype_files=include_genotype_files)
+
+    def record_job_status_to_databases(self, workflow_subtask, submitted_job_id):
+        try:
+            self.local_process_tracking_handler.record_process_sample(
+                project=self.project_obj,
+                sample=self.sample_obj,
+                analysis_module_name="piper_ngi",
+                workflow_subtask=workflow_subtask,
+                config=self.config,
+                **submitted_job_id)
+        except (RuntimeError, ValueError):
+            raise
+
+    def rotate_log_file(self, log_file_path):
+        try:
+            self.filesystem_handler.rotate_file(log_file_path)
+        except OSError:
+            raise
+
+    def submit_commands(self, *args):
+        if self.exec_mode == "sbatch":
+            return self.submit_sbatch_commands(*args)
+
+    def submit_sbatch_commands(self, command_list, workflow_subtask, files_needed_for_analysis):
+        slurm_job_id = self.launch_handler.sbatch_piper_sample(
+            command_list,
+            workflow_subtask,
+            self.project_obj,
+            self.sample_obj,
+            restart_finished_jobs=self.restart_finished_jobs,
+            files_to_copy=files_needed_for_analysis,
+            config=self.config)
+        return {"slurm_job_id": slurm_job_id}
+
+    def submitted_job_status(self, *args):
+        if self.exec_mode == "sbatch":
+            return self.submitted_sbatch_job_status(*args)
+
+    def submitted_sbatch_job_status(self, job_id):
+        slurm_job_id = job_id.get("slurm_job_id")
+        for i in xrange(10):
+            try:
+                job_status = self.slurm_handler.get_slurm_job_status(slurm_job_id)
+                return job_status
+            except ValueError:
+                time.sleep(2)
+        raise RuntimeError("slurm job id {} cannot be found".format(slurm_job_id))
+
+
+@classes.with_ngi_config
 def analyze(project, sample,
-            exec_mode="sbatch", 
+            exec_mode="sbatch",
             restart_finished_jobs=False,
             restart_running_jobs=False,
             keep_existing_data=False,
@@ -55,240 +339,29 @@ def analyze(project, sample,
             genotype_file=None,
             config=None, config_file_path=None,
             generate_bqsr_bam=False):
-    """Analyze data at the sample level.
-
-    :param NGIProject project: the project to analyze
-    :param NGISample sample: the sample to analyzed
-    :param str exec_mode: "sbatch" or "local" (local not implemented)
-    :param bool restart_finished_jobs: Restart jobs that are already done (have a .done file)
-    :param bool restart_running_jobs: Kill and restart currently-running jobs
-    :param str level: The level on which to perform the analysis ("sample" or "genotype")
-    :param str genotype_file: The path to the genotype file (only relevant for genotype analysis)
-    :param dict config: The parsed configuration file (optional)
-    :param str config_file_path: The path to the configuration file (optional)
-
-    :raises ValueError: If exec_mode is an unsupported value
     """
-    if level == "sample":
-        status_field = "alignment_status"
-    elif level == "genotype":
-        status_field = "genotype_status"
-    else:
-        LOG.warn('Unknown workflow level: "{}"'.format(level))
-        status_field = "alignment_status" # Or should we abort?
+    This is the "old" analyze method with preserved signature. Now it wraps around
+    the PiperLauncher object and calls its analyze method
+    """
+    launcher = PiperLauncher(
+        project,
+        sample,
+        restart_finished_jobs=restart_finished_jobs,
+        restart_running_jobs=restart_running_jobs,
+        keep_existing_data=keep_existing_data,
+        generate_bqsr_bam=generate_bqsr_bam,
+        level=level,
+        config=config,
+        exec_mode=exec_mode
+    )
     try:
-        check_for_preexisting_sample_runs(project, sample, restart_running_jobs,
-                                          restart_finished_jobs, status_field)
-    except RuntimeError as e:
-        raise RuntimeError('Aborting processing of project/sample "{}/{}": '
-                           '{}'.format(project, sample, e))
-    if exec_mode.lower() not in ("sbatch", "local"):
-        raise ValueError('"exec_mode" param must be one of "sbatch" or "local" '
-                         'value was "{}"'.format(exec_mode))
-    if exec_mode == "local":
-        modules_to_load = config.get("piper", {}).get("load_modules", [])
-        load_modules(modules_to_load)
-    for workflow_subtask in workflows.get_subtasks_for_level(level=level):
-        if level == "genotype":
-            genotype_status = None # Some records in Charon lack this field, I'm guessing
-            try:
-                charon_session = CharonSession()
-                genotype_status = charon_session.sample_get(projectid=project.project_id,
-                                                            sampleid=sample.name).get("genotype_status")
-            except CharonError as e:
-                LOG.error('Couldn\'t determine genotyping status for project/'
-                          'sample "{}/{}"; skipping analysis.'.format(project, sample))
-                continue
-            if find_previous_genotype_analyses(project, sample) or genotype_status == "DONE":
-                if not restart_finished_jobs:
-                    LOG.info('Project/sample "{}/{}" has completed genotype '
-                             'analysis previously; skipping (use flag to force '
-                             'analysis)'.format(project, sample))
-                    continue
-        if restart_running_jobs:
-            # Kill currently-running jobs if they exist
-            kill_running_sample_analysis(workflow_subtask=workflow_subtask,
-                                         project_id=project.project_id,
-                                         sample_id=sample.name)
-        # This checks the local jobs database
-        if not is_sample_analysis_running_local(workflow_subtask=workflow_subtask,
-                                                project_id=project.project_id,
-                                                sample_id=sample.name):
-            LOG.info('Launching "{}" analysis for sample "{}" in project '
-                     '"{}"'.format(workflow_subtask, sample, project))
-            try:
-                log_file_path = create_log_file_path(workflow_subtask=workflow_subtask,
-                                                     project_base_path=project.base_path,
-                                                     project_name=project.dirname,
-                                                     project_id=project.project_id,
-                                                     sample_id=sample.name)
-                rotate_file(log_file_path)
-                exit_code_path = create_exit_code_file_path(workflow_subtask=workflow_subtask,
-                                                            project_base_path=project.base_path,
-                                                            project_name=project.dirname,
-                                                            project_id=project.project_id,
-                                                            sample_id=sample.name)
-                if level == "sample":
-                    if not keep_existing_data:
-                        remove_previous_sample_analyses(project, sample)
-                elif level == "genotype":
-                    if not keep_existing_data:
-                        remove_previous_genotype_analyses(project)
+        launcher.analyze()
+    except RuntimeError:
+        raise
+    except Exception:
+        raise
 
-                # Update the project to keep only valid fastq files for setup.xml creation
-                if level == "genotype":
-                    updated_project, default_files_to_copy = \
-                            collect_files_for_sample_analysis(project,
-                                                              sample,
-                                                              restart_finished_jobs=True,
-                                                              status_field="genotype_status")
-                else:
-                    updated_project, default_files_to_copy = \
-                            collect_files_for_sample_analysis(project,
-                                                              sample,
-                                                              restart_finished_jobs,
-                                                              status_field="alignment_status")
-                setup_xml_cl, setup_xml_path = build_setup_xml(project=updated_project,
-                                                               sample=sample,
-                                                               workflow=workflow_subtask,
-                                                               local_scratch_mode=(exec_mode == "sbatch"),
-                                                               config=config)
-                piper_cl = build_piper_cl(project=project,
-                                          workflow_name=workflow_subtask,
-                                          setup_xml_path=setup_xml_path,
-                                          exit_code_path=exit_code_path,
-                                          config=config,
-                                          exec_mode=exec_mode,
-                                          generate_bqsr_bam=generate_bqsr_bam)
-                if exec_mode == "sbatch":
-                    process_id = None
-                    slurm_job_id = sbatch_piper_sample([setup_xml_cl, piper_cl],
-                                                       workflow_subtask,
-                                                       project, sample,
-                                                       restart_finished_jobs=restart_finished_jobs,
-                                                       files_to_copy=default_files_to_copy)
-                    for x in xrange(10):
-                        # Time delay to let sbatch get its act together
-                        # (takes a few seconds to be visible with sacct)
-                        try:
-                            get_slurm_job_status(slurm_job_id)
-                            break
-                        except ValueError:
-                            time.sleep(2)
-                    else:
-                        LOG.error('sbatch file for sample {}/{} did not '
-                                  'queue properly! Job ID {} cannot be '
-                                  'found.'.format(project, sample, slurm_job_id))
-                else: # "local"
-                    raise NotImplementedError('Local execution not currently implemented. '
-                                              'I\'m sure Denis can help you with this.')
-                    #slurm_job_id = None
-                    #launch_piper_job(setup_xml_cl, project)
-                    #process_handle = launch_piper_job(piper_cl, project)
-                    #process_id = process_handle.pid
-                try:
-                    record_process_sample(project=project,
-                                          sample=sample,
-                                          analysis_module_name="piper_ngi",
-                                          slurm_job_id=slurm_job_id,
-                                          process_id=process_id,
-                                          workflow_subtask=workflow_subtask)
-                except RuntimeError as e:
-                    LOG.error(e)
-                    ## Question: should we just kill the run in this case or let it go?
-                    continue
-            except (NotImplementedError, RuntimeError, ValueError) as e:
-                error_msg = ('Processing project "{}" / sample "{}" / workflow "{}" '
-                             'failed: {}'.format(project, sample,
-                                                 workflow_subtask,
-                                                 e))
-                LOG.error(error_msg)
-
-
-def collect_files_for_sample_analysis(project_obj, sample_obj, 
-                                      restart_finished_jobs=False,
-                                      status_field="alignment_status"):
-    """This function finds all data files relating to a sample and
-    follows a preset decision path to decide which of them to include in
-    a sample-level analysis. This can include fastq files, bam files, and
-    alignment-qc-level files.
-    Doesn't modify existing project or sample objects; returns new copies.
-
-    :param NGIProject project_obj: The NGIProject object to process
-    :param NGISample sample_obj: The NGISample object to process
-    :param bool restart_finished_jobs: Include jobs marked as "DONE" (default False)
-    :param str status_field: Which Charon status field to check (alignment, genotype)
-
-    :returns: A new NGIProject object, a list of alignment and qc files
-    :rtype: NGIProject, list, list
-
-    :raises ValueError: If there are no valid libpreps, seqruns, or fastq files
-    """
-    ### FASTQ
-    # Access the filesystem to determine what fastq files are available
-    # For each file, validate it.
-
-    # This funtion goes into Charon and finds all valid libpreps and seqruns,
-    # dvs libpreps for which               'qc' != "FAILED"
-    # and seqruns  for which 'alignment_status' != "DONE"
-    valid_libprep_seqruns = \
-            get_valid_seqruns_for_sample(project_id=project_obj.project_id,
-                                         sample_id=sample_obj.name,
-                                         include_failed_libpreps=False,
-                                         include_done_seqruns=restart_finished_jobs,
-                                         status_field=status_field)
-    if not valid_libprep_seqruns:
-        raise ValueError('No valid libpreps/seqruns found for project/sample '
-                         '"{}/{}"'.format(project_obj, sample_obj))
-
-    # Locate genotype files under the project data directory
-    project_data_directory = os.path.join(project_obj.base_path, "DATA", project_obj.dirname)
-    chip_genotype_files = filter(
-        lambda f: f.endswith(".vcf") or f.endswith(".vcf.gz"),
-        glob.glob(os.path.join(project_data_directory, "*.vcf*")))
-
-    # Now we find all fastq files that are available and validate them against
-    # the group compiled in the previous step (get_valid_seqruns_for_sample)
-    # We're going to recreate NGIProject/NGISample/NGILibraryPrep/NGISeqrun objects here
-    sample_data_directory = os.path.join(project_obj.base_path, "DATA",
-                                         project_obj.dirname, sample_obj.dirname)
-    fastq_files_on_filesystem = fastq_files_under_dir(sample_data_directory, realpath=False)
-    if not fastq_files_on_filesystem:
-        raise ValueError('No valid fastq files found for project/sample '
-                         '{}/{}'.format(project_obj, sample_obj))
-
-    # Create a new NGIProject object (the old one could still be in use elsewhere)
-    proj_obj = NGIProject(project_obj.name, project_obj.dirname,
-                          project_obj.project_id, project_obj.base_path,
-                          chip_genotypes=map(
-                              lambda f: NGIChipGenotypes(
-                                  name=os.path.basename(f)),
-                              chip_genotype_files) if chip_genotype_files is not None else None)
-    sample_obj = proj_obj.add_sample(sample_obj.name, sample_obj.dirname)
-    for fastq_path in fastq_files_on_filesystem:
-        base_path, fastq = os.path.split(fastq_path)
-        if not fastq:
-            base_path, fastq = os.path.split(base_path) # Handles trailing slash
-        base_path, fs_seqrun_name = os.path.split(base_path)
-        base_path, fs_libprep_name = os.path.split(base_path)
-        if fs_libprep_name not in valid_libprep_seqruns.keys():
-            # Invalid library prep, skip this fastq file
-            continue
-        elif fs_seqrun_name not in valid_libprep_seqruns.get(fs_libprep_name, []):
-            continue
-        else:
-            libprep_obj = sample_obj.add_libprep(name=fs_libprep_name, dirname=fs_libprep_name)
-            seqrun_obj = libprep_obj.add_seqrun(name=fs_seqrun_name, dirname=fs_seqrun_name)
-            seqrun_obj.add_fastq_files(fastq)
-
-    ### EXISTING DATA
-    # If we still have data here at this point, we'll copy it over. If we had
-    # decided to scrap it, it would have been deleted already.
-    files_to_copy = find_previous_sample_analyses(proj_obj, sample_obj, include_genotype_files=True)
-
-    return (proj_obj, files_to_copy)
-
-@with_ngi_config
+@classes.with_ngi_config
 def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
                         libprep=None, restart_finished_jobs=False, files_to_copy=None,
                         config=None, config_file_path=None):
@@ -307,7 +380,7 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
     perm_analysis_dir = os.path.join(project.base_path, "ANALYSIS", project_dirname, "piper_ngi", "")
     scratch_analysis_dir = os.path.join("$SNIC_TMP/ANALYSIS/", project_dirname, "piper_ngi", "")
     #ensure that the analysis dir exists
-    safe_makedir(perm_analysis_dir)
+    filesystem.safe_makedir(perm_analysis_dir)
     try:
         slurm_project_id = config["environment"]["project_id"]
     except KeyError:
@@ -319,8 +392,8 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
     slurm_out_log = os.path.join(perm_analysis_dir, "logs", "{}_sbatch.out".format(job_identifier))
     slurm_err_log = os.path.join(perm_analysis_dir, "logs", "{}_sbatch.err".format(job_identifier))
     for log_file in slurm_out_log, slurm_err_log:
-        rotate_file(log_file)
-    sbatch_text = create_sbatch_header(slurm_project_id=slurm_project_id,
+        filesystem.rotate_file(log_file)
+    sbatch_text = sample_runs_handler.create_sbatch_header(slurm_project_id=slurm_project_id,
                                        slurm_queue=slurm_queue,
                                        num_cores=num_cores,
                                        slurm_time=slurm_time,
@@ -336,10 +409,6 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
         sbatch_text_list.append("\n# Load required modules for Piper")
         for module_name in modules_to_load:
             sbatch_text_list.append("module load {}".format(module_name))
-
-    if not files_to_copy:
-        project, files_to_copy = \
-            collect_files_for_sample_analysis(project, sample, restart_finished_jobs)
 
     # Fastq files to copy
     fastq_src_dst_list = []
@@ -394,7 +463,7 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
         sbatch_text_list.append(command_line)
 
 
-    piper_status_file = create_exit_code_file_path(workflow_subtask=workflow_name,
+    piper_status_file = sample_runs_handler.create_exit_code_file_path(workflow_subtask=workflow_name,
                                                    project_base_path=project.base_path,
                                                    project_name=project.dirname,
                                                    project_id=project.project_id,
@@ -434,14 +503,14 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
 
     # Write the sbatch file
     sbatch_dir = os.path.join(perm_analysis_dir, "sbatch")
-    safe_makedir(sbatch_dir)
+    filesystem.safe_makedir(sbatch_dir)
     sbatch_outfile = os.path.join(sbatch_dir, "{}.sbatch".format(job_identifier))
-    rotate_file(sbatch_outfile)
+    filesystem.rotate_file(sbatch_outfile)
     with open(sbatch_outfile, 'w') as f:
         f.write("\n".join(sbatch_text_list))
     LOG.info("Queueing sbatch file {} for job {}".format(sbatch_outfile, job_identifier))
     # Queue the sbatch file
-    p_handle = execute_command_line("sbatch {}".format(sbatch_outfile),
+    p_handle = filesystem.execute_command_line("sbatch {}".format(sbatch_outfile),
                                     stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE)
     p_out, p_err = p_handle.communicate()
@@ -451,5 +520,5 @@ def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
         raise RuntimeError('Could not submit sbatch job for workflow "{}": '
                            '{}'.format(job_identifier, p_err))
     # Detail which seqruns we've started analyzing so we can update statuses later
-    record_analysis_details(project, job_identifier)
+    sample_runs_handler.record_analysis_details(project, job_identifier)
     return int(slurm_job_id)

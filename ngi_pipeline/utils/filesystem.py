@@ -149,14 +149,22 @@ def locate_chip_genotypes_for_project(project, config=None):
     # check if there are genotypes for the project
     project_chip_genotypes = []
     for genotype_project_dir in [os.path.join(root_dir, project) for root_dir in genotype_root_dir]:
-        project_chip_genotypes.extend(
-            filter(
-                lambda f: f.endswith(".vcf") or f.endswith(".vcf.gz"),
-                glob.glob(
-                    os.path.join(genotype_project_dir, "*.vcf*"))))
+        project_chip_genotypes.extend(locate_chip_genotypes_in_dir(genotype_project_dir))
 
     # return the list of genotype files or None if it's empty
     return project_chip_genotypes if len(project_chip_genotypes) > 0 else None
+
+
+def locate_chip_genotypes_in_dir(root_dir):
+    """Searches the specified directory and returns files matching the expectation for being chip genotypes
+
+    :param str root_dir: The folder to search for chip genotypes in (does not search recursively)
+    :returns: A (possibly empty) list of paths (including root_dir) to chip genotype files
+    :rtype: list
+    """
+    return filter(
+        lambda f: f.endswith(".vcf") or f.endswith(".vcf.gz"),
+        glob.glob(os.path.join(root_dir, "*.vcf*")))
 
 
 def execute_command_line(cl, shell=False, stdout=None, stderr=None, cwd=None):
