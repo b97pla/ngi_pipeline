@@ -69,13 +69,15 @@ class PiperLauncher(object):
                 self.sample_obj,
                 ",".join(workflow_subtasks),
                 ne))
-            return False
+            return None
 
         # assert that the sample is ok to be started (this will raise an exception if that's not the case)
         try:
             self.assert_sample_should_be_started()
         except RuntimeError:
             raise
+
+        submitted_job_ids = []
 
         # iterate over the workflow subtasks and start them, cleaning up as we go
         for workflow_subtask in workflow_subtasks:
@@ -130,6 +132,8 @@ class PiperLauncher(object):
             submitted_job_id = self.submit_commands(
                 [setup_command, piper_command], workflow_subtask, old_files_for_analysis)
 
+            submitted_job_ids.append(submitted_job_id)
+
             # verify the job status of the submitted commands
             try:
                 self.submitted_job_status(submitted_job_id)
@@ -143,12 +147,13 @@ class PiperLauncher(object):
             except (RuntimeError, ValueError) as err:
                 LOG.error("error recording job status to database: {}".format(err))
 
+        return submitted_job_ids
+
     def assert_exec_mode(self):
         implemented_modes = ["sbatch"]
         if self.exec_mode not in implemented_modes:
             raise NotImplementedError("{} execution mode not implemented. Only {} available.".format(
-                self.exec_mode, ",".join(implemented_modes)
-            ))
+                self.exec_mode, ",".join(implemented_modes)))
 
     def assert_sample_should_be_started(self):
         try:
@@ -191,7 +196,7 @@ class PiperLauncher(object):
             self.project_obj.project_id,
             self.project_obj.base_path,
             chip_genotypes=map(
-                lambda f: NGIChipGenotypes(name=os.path.basename(f)),
+                lambda f: NGIChipGenotypes(name=os.path.basename(f), dirname=os.path.basename(os.path.dirname(f))),
                 chip_genotype_files) if chip_genotype_files else None)
 
         # attach a sample object
@@ -235,8 +240,7 @@ class PiperLauncher(object):
             next(local_project_obj),
             workflow_subtask,
             self.exec_mode == "sbatch",
-            self.config
-        )
+            self.config)
 
     def determine_seqruns_to_be_analyzed(self, include_failed_libpreps=False):
         valid_seqruns = self.preexisting_sample_runs_handler.get_valid_seqruns_for_sample(
@@ -271,7 +275,7 @@ class PiperLauncher(object):
         # filter fastq files against valid seqruns if specified,
         # this assumes a hierarchy like .../libprep/seqrun/file.fastq.gz
         return filter(
-            lambda fq: any(
+            lambda fq: not valid_seqrun_paths or any(
                 map(
                     lambda pth: os.path.split(fq)[0].endswith(pth),
                     valid_seqrun_paths)),
