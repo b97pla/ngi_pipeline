@@ -333,36 +333,91 @@ class PiperLauncher(object):
                 time.sleep(2)
         raise RuntimeError("slurm job id {} cannot be found".format(slurm_job_id))
 
-    def create_sbatch_script(self, command_list, workflow_subtask, files_needed_for_analysis):
-        job_identifier = "{}-{}-{}".format(
-            self.project_obj.project_id,
-            self.sample_obj,
-            workflow_subtask)
-
-        # Paths to the various data directories
-        project_dirname = project.dirname
-        local_analysis_dir = os.path.join(project.base_path, "ANALYSIS", project_dirname, "piper_ngi")
-        scratch_analysis_dir = os.path.join("$SNIC_TMP", "ANALYSIS", self.project_obj.dirname, "piper_ngi")
-
-        # ensure that the analysis dir exists
-        self.filesystem_handler.safe_makedir(local_analysis_dir)
+    def create_sbatch_script(self, command_list, workflow_subtask, files_needed_for_analysis, log_file_path, exit_code_path):
+        # assert that we have a project id for slurm
         try:
             slurm_project_id = self.config["environment"]["project_id"]
         except KeyError:
-            raise RuntimeError('No SLURM project id specified in configuration file '
-                               'for job "{}"'.format(job_identifier))
+            raise RuntimeError(
+                "No SLURM project id specified in configuration file for project/sample {}/{}".format(
+                    self.project_obj, self.sample_obj))
+
+        # Paths to the various data directories
+        local_analysis_dir = os.path.join(self.project_analysis_directory, "piper_ngi")
+        scratch_analysis_dir = os.path.join("$SNIC_TMP", "ANALYSIS", self.project_obj.dirname, "piper_ngi")
+        scratch_data_dir = os.path.join("$SNIC_TMP", "DATA", self.project_obj.dirname)
+
+        # ensure that the analysis dir exists
+        self.filesystem_handler.safe_makedir(local_analysis_dir)
+
+        # get a list of source and destination fastq files to rsync
+        files_to_rsync = []
+        for libprep in self.sample_obj:
+            for seqrun in libprep:
+                subdir = os.path.join(
+                    self.sample_obj.dirname,
+                    libprep.dirname,
+                    seqrun.dirname)
+                for fqfile in seqrun.fastq_files:
+                    files_to_rsync.append(
+                        [os.path.join(self.project_data_directory, subdir, fqfile),
+                         os.path.join(scratch_data_dir, subdir, fqfile)])
+
+        if not files_to_rsync:
+            raise ValueError(
+                "No valid fastq files available to process for project/sample {}/{}".format(
+                    self.project_obj, self.sample_obj))
+
+        # also, copy chip genotype files
+        if self.project_obj.chip_genotypes:
+            for chip_genotype in self.project_obj.chip_genotypes:
+                files_to_rsync.append([
+                    os.path.join(self.project_data_directory, chip_genotype.name),
+                    os.path.join(scratch_data_dir, chip_genotype.name)])
+
+        rsync_fastq_file_statements = list(set(
+            map(
+                lambda x: "mkdir -p {}".format(os.path.dirname(x[1])),
+                files_to_rsync)))
+        rsync_fastq_file_statements.extend(
+            map(
+                lambda x: "rsync -rptoDLv {} {}".format(x[0], x[1]),
+                files_to_rsync))
+
+        rsync_preexisting_results_statement = [
+            "echo -ne '\\n\\nCopying pre-existing analysis files at '$(date)",
+            "mkdir -p {}".format(scratch_analysis_dir),
+            "rsync -rptoDLv {} {}".format(
+                " ".join(files_needed_for_analysis),
+                scratch_analysis_dir),
+            "echo -ne '\\n\\nDeleting pre-existing analysis files at '$(date)",
+            "rm -rf {}".format(files_needed_for_analysis)
+        ] if files_needed_for_analysis else []
 
         sbatch_parameters = {
             "slurm_project_id": slurm_project_id,
             "slurm_queue": self.config.get("slurm", {}).get("queue", "core"),
             "num_cores": self.config.get("slurm", {}).get("cores", "16"),
             "slurm_time": self.config.get("piper", {}).get("job_walltime", {}).get(workflow_subtask, "10-00:00:00"),
-
-            sbatch_extra_params = config.get("slurm", {}).get("extra_params", {})}
+            "sbatch_extra_params": "\n".join(
+                map(
+                    lambda (k, v): "#SBATCH {} {}".format(k, v),
+                    self.config.get("slurm", {}).get("extra_params", {}).items())),
+            "load_module_statements": "\n".join(
+                map(
+                    lambda x: "module load {}".format(x),
+                    self.config.get("piper", {}).get("load_modules", []))),
+            "rsync_fastq_file_statements": "\n".join(rsync_fastq_file_statements),
+            "rsync_preexisting_results_statement": "\n".join(rsync_preexisting_results_statement),
+            "command_line_statements": "\n".join(command_list),
+            "checksum_calculation_statements": "",
+            "rsync_analysis_results_statements": "rsync -rptoDLv {}{} {}{}".format(
+                scratch_analysis_dir, os.path.sep, local_analysis_dir, os.path.sep),
+            "piper_status_file": exit_code_path
+        }
 
         for log_stream in ["out", "err"]:
-            log_file = os.path.join(
-                local_analysis_dir, "logs", "{}_sbatch.{}".format(job_identifier, log_stream))
+            log_file = log_file_path.replace(".log", "_sbatch.{}".format(log_stream))
             filesystem.rotate_file(log_file)
             sbatch_parameters["slurm_{}_log".format(log_stream)] = log_file
 
@@ -415,6 +470,7 @@ def sbatch_script_template():
     #SBATCH -e {slurm_err_log}
     {extra_sbatch_parameters}
 
+    # Load required modules for Piper
     {load_module_statements}
 
     echo -ne "
