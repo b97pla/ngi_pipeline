@@ -54,6 +54,7 @@ class PiperLauncher(object):
         # set derived fields
         self.status_field = "alignment_status" if self.level == "sample" else "genotype_status"
         self.project_data_directory = os.path.join(self.project_obj.base_path, "DATA", self.project_obj.dirname)
+        self.project_analysis_directory = os.path.join(self.project_obj.base_path, "ANALYSIS", self.project_obj.dirname)
         self.sample_data_directory = os.path.join(self.project_data_directory, self.sample_obj.dirname)
 
     def analyze(self):
@@ -332,6 +333,40 @@ class PiperLauncher(object):
                 time.sleep(2)
         raise RuntimeError("slurm job id {} cannot be found".format(slurm_job_id))
 
+    def create_sbatch_script(self, command_list, workflow_subtask, files_needed_for_analysis):
+        job_identifier = "{}-{}-{}".format(
+            self.project_obj.project_id,
+            self.sample_obj,
+            workflow_subtask)
+
+        # Paths to the various data directories
+        project_dirname = project.dirname
+        local_analysis_dir = os.path.join(project.base_path, "ANALYSIS", project_dirname, "piper_ngi")
+        scratch_analysis_dir = os.path.join("$SNIC_TMP", "ANALYSIS", self.project_obj.dirname, "piper_ngi")
+
+        # ensure that the analysis dir exists
+        self.filesystem_handler.safe_makedir(local_analysis_dir)
+        try:
+            slurm_project_id = self.config["environment"]["project_id"]
+        except KeyError:
+            raise RuntimeError('No SLURM project id specified in configuration file '
+                               'for job "{}"'.format(job_identifier))
+
+        sbatch_parameters = {
+            "slurm_project_id": slurm_project_id,
+            "slurm_queue": self.config.get("slurm", {}).get("queue", "core"),
+            "num_cores": self.config.get("slurm", {}).get("cores", "16"),
+            "slurm_time": self.config.get("piper", {}).get("job_walltime", {}).get(workflow_subtask, "10-00:00:00"),
+
+            sbatch_extra_params = config.get("slurm", {}).get("extra_params", {})}
+
+        for log_stream in ["out", "err"]:
+            log_file = os.path.join(
+                local_analysis_dir, "logs", "{}_sbatch.{}".format(job_identifier, log_stream))
+            filesystem.rotate_file(log_file)
+            sbatch_parameters["slurm_{}_log".format(log_stream)] = log_file
+
+
 
 @classes.with_ngi_config
 def analyze(project, sample,
@@ -364,6 +399,64 @@ def analyze(project, sample,
         raise
     except Exception:
         raise
+
+
+def sbatch_script_template():
+    return """
+    #!/bin/bash -l
+
+    #SBATCH -A {slurm_project_id}
+    #SBATCH -p {slurm_queue}
+    #SBATCH -n {num_cores}
+    #SBATCH -N {num_nodes}
+    #SBATCH -t {slurm_time}
+    #SBATCH -J {job_name}
+    #SBATCH -o {slurm_out_log}
+    #SBATCH -e {slurm_err_log}
+    {extra_sbatch_parameters}
+
+    {load_module_statements}
+
+    echo -ne "
+
+    Copying fastq files at $(date)"
+
+    {rsync_fastq_file_statements}
+
+    {rsync_preexisting_results_statement}
+
+    echo -ne "
+
+    Executing command lines at $(date)"
+
+    # Run the actual commands
+    {command_line_statements}
+
+    PIPER_RETURN_CODE=$?
+
+    {checksum_calculation_statements}
+
+    echo -ne "
+
+    Copying back the resulting analysis files at $(date)"
+
+    {rsync_analysis_results_statements}
+
+    RSYNC_RETURN_CODE=$?
+
+    # Record job completion status
+    if [[ $RSYNC_RETURN_CODE == 0 ]]
+    then
+        if [[ $PIPER_RETURN_CODE == 0 ]]
+        then
+            echo 0 > {piper_status_file}
+        else
+            echo 1 > {piper_status_file}
+        fi
+    else
+        echo 2 > {piper_status_file}
+    fi
+    """
 
 @classes.with_ngi_config
 def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
