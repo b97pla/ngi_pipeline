@@ -290,6 +290,22 @@ class TestPiperLauncher(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.launcher.determine_seqruns_to_be_analyzed()
 
+    def test_get_files_from_project_obj(self):
+        local_project_obj = next(self.project_data.next())
+        self.assertListEqual([], self.launcher.get_files_from_project_obj(local_project_obj))
+
+    def test_get_files_from_sample_obj(self):
+        local_sample_obj = self.launcher.sample_obj
+        expected_fastq_files = []
+        self.assertListEqual(expected_fastq_files, self.launcher.get_files_from_sample_obj(local_sample_obj))
+        for libprep in local_sample_obj:
+            for seqrun in libprep:
+                for i in xrange(3):
+                    expected_fastq_files.append(
+                        os.path.join(local_sample_obj.dirname, libprep.dirname, seqrun.dirname, "fastq_file_{}".format(i+1)))
+                    seqrun.add_fastq_files(os.path.basename(expected_fastq_files[-1]))
+        self.assertListEqual(expected_fastq_files, self.launcher.get_files_from_sample_obj(local_sample_obj))
+
     def test_locate_chip_genotype_files_for_project(self):
         expected_genotype_files = ["this", "is", "a", "bunch", "of", "genotype", "files"]
         self.launcher.filesystem_handler.locate_chip_genotypes_in_dir.return_value = expected_genotype_files
@@ -370,28 +386,45 @@ class TestPiperLauncher(unittest.TestCase):
             self.launcher.rotate_log_file(expected_log_file)
 
     def _submit_sbatch_commands_helper(self, test_fn):
-        expected_args = [
+        args = [
             ["expected command 1",
              "expected command 2"],
             "workflow_subtask",
-            self.launcher.project_obj,
-            self.launcher.sample_obj]
-        expected_kwargs = {
-            "restart_finished_jobs": self.launcher.restart_finished_jobs,
-            "files_to_copy": [
-                "file 1 needed for analysis",
-                "file 2 needed for analysis",
-                "file 3 needed for analysis"],
-            "config": self.launcher.config}
+            ["file 1 needed for analysis",
+             "file 2 needed for analysis",
+             "file 3 needed for analysis"],
+            ["old file 1 needed for analysis",
+             "old file 2 needed for analysis",
+             "old file 3 needed for analysis"],
+            os.path.join("path", "to", "log", "file"),
+            os.path.join("path", "to", "exit", "code", "file")]
+
+        # mock internal calls
         expected_slurm_job_id = {"slurm_job_id": 123456}
-        self.launcher.launch_handler.sbatch_piper_sample.return_value = expected_slurm_job_id["slurm_job_id"]
-        self.assertDictEqual(
-            expected_slurm_job_id,
-            test_fn(
-                expected_args[0],
-                expected_args[1],
-                expected_kwargs["files_to_copy"]))
-        self.launcher.launch_handler.sbatch_piper_sample.assert_called_once_with(*expected_args, **expected_kwargs)
+        sbatch_script = "this is some mock content for sbatch script"
+        sbatch_script_file = os.path.join("path", "to", "sbatch", "script", "file")
+        sbatch_stdout = "Submitted batch job {}".format(expected_slurm_job_id["slurm_job_id"])
+        sbatch_stderr = "this is sbatch stderr output"
+        self.launcher.generate_sbatch_script = mock.create_autospec(
+            self.launcher.generate_sbatch_script, return_value=sbatch_script)
+        self.launcher.write_sbatch_script = mock.create_autospec(
+            self.launcher.write_sbatch_script, return_value=sbatch_script_file)
+        self.launcher.record_analysis_details = mock.create_autospec(
+            self.launcher.record_analysis_details)
+        process_handle = self.launcher.filesystem_handler.execute_command_line.return_value
+        process_handle.communicate.return_value = (sbatch_stdout, sbatch_stderr)
+
+        # call the test function and make assertions based on input
+        self.assertDictEqual(expected_slurm_job_id, test_fn(*args))
+        self.launcher.generate_sbatch_script.assert_called_once_with(*args)
+        self.launcher.write_sbatch_script.assert_called_once_with(args[1], sbatch_script)
+        self.assertEqual(1, self.launcher.filesystem_handler.execute_command_line.call_count)
+        self.launcher.record_analysis_details.assert_called_once_with(args[1])
+
+        # call the test function and fail in parsing the sbatch job id
+        process_handle.communicate.return_value = ("no sbatch job id can be parsed from this string", sbatch_stderr)
+        with self.assertRaises(RuntimeError):
+            test_fn(*args)
 
     def test_submit_commands(self):
         # when exec_mode is "sbatch", this method will only be a wrapper around submit_sbatch_commands
@@ -422,3 +455,24 @@ class TestPiperLauncher(unittest.TestCase):
 
     def test_submitted_sbatch_job_status(self):
         self._submitted_sbatch_job_status_helper(self.launcher.submitted_sbatch_job_status)
+
+    def test_write_sbatch_script(self):
+        workflow_subtask = "this-is-a-workflow-subtask"
+        sbatch_script = "this is a sbatch script"
+        job_identifier = "this-is-a-job-identifier"
+        expected_sbatch_script_file = os.path.join(
+            self.launcher.piper_analysis_directory, "sbatch", "{}.sbatch".format(
+                job_identifier))
+        self.launcher.job_identifier = mock.create_autospec(self.launcher.job_identifier, return_value=job_identifier)
+        self.launcher.rotate_log_file = mock.create_autospec(self.launcher.rotate_log_file)
+        # mock the open call
+        with mock.patch("ngi_pipeline.engines.piper_ngi.launchers.open", mock.mock_open(), create=True) as open_mock:
+            fhandle_mock = open_mock.return_value
+            # call the write method and make assertions
+            self.assertEqual(
+                expected_sbatch_script_file,
+                self.launcher.write_sbatch_script(workflow_subtask, sbatch_script))
+            self.launcher.filesystem_handler.safe_makedir.assert_called_once_with(
+                os.path.dirname(expected_sbatch_script_file))
+            self.launcher.rotate_log_file.assert_called_once_with(expected_sbatch_script_file)
+            fhandle_mock.write.assert_called_once_with(sbatch_script)

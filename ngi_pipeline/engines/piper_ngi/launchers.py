@@ -56,6 +56,7 @@ class PiperLauncher(object):
         self.project_data_directory = os.path.join(self.project_obj.base_path, "DATA", self.project_obj.dirname)
         self.project_analysis_directory = os.path.join(self.project_obj.base_path, "ANALYSIS", self.project_obj.dirname)
         self.sample_data_directory = os.path.join(self.project_data_directory, self.sample_obj.dirname)
+        self.piper_analysis_directory = os.path.join(self.project_analysis_directory, "piper_ngi")
 
     def analyze(self):
         # get the list of workflow subtasks to perform
@@ -122,6 +123,9 @@ class PiperLauncher(object):
             local_project_obj = self.create_local_copy_of_project_obj(
                 fastq_files_for_analysis, chip_genotypes_for_analysis)
 
+            # get an updated list of files that will go into the analysis from the local project object
+            files_for_analysis = self.get_files_from_project_obj(local_project_obj)
+
             # create the setup command and get the setup xml output path
             setup_command, setup_xml_path = self.create_setup_command(local_project_obj, workflow_subtask)
 
@@ -131,7 +135,12 @@ class PiperLauncher(object):
 
             # submit the commands for execution
             submitted_job_id = self.submit_commands(
-                [setup_command, piper_command], workflow_subtask, old_files_for_analysis)
+                [setup_command, piper_command],
+                workflow_subtask,
+                files_for_analysis,
+                old_files_for_analysis,
+                log_file_path,
+                exit_code_path)
 
             submitted_job_ids.append(submitted_job_id)
 
@@ -258,6 +267,128 @@ class PiperLauncher(object):
     def determine_workflow_subtasks(self):
         return self.workflow_handler.get_subtasks_for_level(level=self.level)
 
+    def generate_sbatch_script(
+            self,
+            command_list,
+            workflow_subtask,
+            files_needed_for_analysis,
+            old_files_needed_for_analysis,
+            log_file_path,
+            exit_code_path):
+
+        # assert that we have a project id for slurm
+        try:
+            slurm_project_id = self.config["environment"]["project_id"]
+        except KeyError:
+            raise RuntimeError(
+                "No SLURM project id specified in configuration file for project/sample {}/{}".format(
+                    self.project_obj, self.sample_obj))
+
+        # Paths to the various data directories
+        scratch_analysis_dir = self.piper_analysis_directory.replace(self.project_obj.base_path, "$SNIC_TMP")
+        scratch_data_dir = self.project_data_directory.replace(self.project_obj.base_path, "$SNIC_TMP")
+
+        # get a list of source and destination file pairs to rsync
+        files_to_rsync = map(
+            lambda x: [os.path.join(self.project_data_directory, x), os.path.join(scratch_data_dir, x)],
+            files_needed_for_analysis)
+
+        # transform the list of files to statements
+        rsync_fastq_file_statements = list(set(
+            map(
+                lambda x: "mkdir -p {}".format(os.path.dirname(x[1])),
+                files_to_rsync)))
+        rsync_fastq_file_statements.extend(
+            map(
+                lambda x: "rsync -rptoDLv {} {}".format(x[0], x[1]),
+                files_to_rsync))
+
+        # set up syncing and removal of previous analysis results, if applicable
+        rsync_preexisting_results_statement = """
+            echo -ne "
+
+            Copying pre-existing analysis files at $(date)"
+            mkdir -p {scratch_analysis_dir}
+            rsync -rptoDLv {files_on_source} {scratch_analysis_dir}
+            echo -ne "
+
+            Deleting pre-existing analysis files at $(date)"
+            rm -rf {files_on_source}
+        """.format(**{
+            "scratch_analysis_dir": scratch_analysis_dir,
+            "files_on_source": " ".join(old_files_needed_for_analysis)}) if old_files_needed_for_analysis else ""
+
+        # calculate checksums of the large files
+        checksum_calculation_statements = """
+            for f in $(find {scratch_analysis_dir} -type f -size +100M)
+            do
+              md5sum $f |awk '{{printf $1}}' > $f.md5 &
+            done
+            wait
+        """.format(scratch_analysis_dir)
+
+        # set up syncing the analysis folder back
+        rsync_analysis_results_statements = """
+            rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
+        """.format(**{
+            "local_analysis_dir": self.piper_analysis_directory,
+            "scratch_analysis_dir": scratch_analysis_dir,
+            "sep": os.path.sep})
+
+        # prepare the dictionary to use for replacing placeholders in the script template
+        sbatch_parameters = {
+            "slurm_project_id": slurm_project_id,
+            "slurm_queue": self.config.get("slurm", {}).get("queue", "core"),
+            "num_cores": self.config.get("slurm", {}).get("cores", "16"),
+            "slurm_time": self.config.get("piper", {}).get("job_walltime", {}).get(workflow_subtask, "10-00:00:00"),
+            "sbatch_extra_params": "\n".join(
+                map(
+                    lambda (k, v): "#SBATCH {} {}".format(k, v),
+                    self.config.get("slurm", {}).get("extra_params", {}).items())),
+            "load_module_statements": "\n".join(
+                map(
+                    lambda x: "module load {}".format(x),
+                    self.config.get("piper", {}).get("load_modules", []))),
+            "rsync_fastq_file_statements": "\n".join(rsync_fastq_file_statements),
+            "rsync_preexisting_results_statement": rsync_preexisting_results_statement,
+            "command_line_statements": "\n".join(command_list),
+            "checksum_calculation_statements": checksum_calculation_statements,
+            "rsync_analysis_results_statements": rsync_analysis_results_statements,
+            "piper_status_file": exit_code_path
+        }
+
+        # rotate the log files
+        for log_stream in ["out", "err"]:
+            log_file = log_file_path.replace(".log", "_sbatch.{}".format(log_stream))
+            self.rotate_log_file(log_file)
+            sbatch_parameters["slurm_{}_log".format(log_stream)] = log_file
+
+        return sbatch_script_template().format(**sbatch_parameters)
+
+    @staticmethod
+    def get_files_from_project_obj(local_project_obj):
+        project_files = [chip_genotype.name for chip_genotype in local_project_obj.chip_genotypes or []]
+        for local_sample_obj in local_project_obj:
+            project_files.extend(PiperLauncher.get_files_from_sample_obj(local_sample_obj))
+        return project_files
+
+    @staticmethod
+    def get_files_from_sample_obj(local_sample_obj):
+        sample_files = []
+        for libprep in local_sample_obj:
+            for seqrun in libprep:
+                subdir = os.path.join(
+                    local_sample_obj.dirname,
+                    libprep.dirname,
+                    seqrun.dirname)
+                for fqfile in seqrun.fastq_files:
+                    sample_files.append(
+                        os.path.join(subdir, fqfile))
+        return sample_files
+
+    def job_identifier(self, workflow_subtask):
+        return "-".join([self.project_obj.name, self.sample_obj.name, workflow_subtask])
+
     def locate_chip_genotype_files_for_project(self):
         chip_genotype_files = self.filesystem_handler.locate_chip_genotypes_in_dir(self.project_data_directory)
         return chip_genotype_files if chip_genotype_files else None
@@ -286,6 +417,9 @@ class PiperLauncher(object):
         return self.preexisting_sample_runs_handler.find_previous_sample_analyses(
             self.project_obj, self.sample_obj,  include_genotype_files=include_genotype_files)
 
+    def record_analysis_details(self, workflow_subtask):
+        self.sample_runs_handler.record_analysis_details(self.project_obj, self.job_identifier(workflow_subtask))
+
     def record_job_status_to_databases(self, workflow_subtask, submitted_job_id):
         try:
             self.local_process_tracking_handler.record_process_sample(
@@ -308,16 +442,48 @@ class PiperLauncher(object):
         if self.exec_mode == "sbatch":
             return self.submit_sbatch_commands(*args)
 
-    def submit_sbatch_commands(self, command_list, workflow_subtask, files_needed_for_analysis):
-        slurm_job_id = self.launch_handler.sbatch_piper_sample(
+    def submit_sbatch_commands(
+            self,
             command_list,
             workflow_subtask,
-            self.project_obj,
-            self.sample_obj,
-            restart_finished_jobs=self.restart_finished_jobs,
-            files_to_copy=files_needed_for_analysis,
-            config=self.config)
-        return {"slurm_job_id": slurm_job_id}
+            files_needed_for_analysis,
+            old_files_needed_for_analysis,
+            log_file_path,
+            exit_code_path):
+
+        # generate the sbatch script for the analysis
+        sbatch_script = self.generate_sbatch_script(
+            command_list,
+            workflow_subtask,
+            files_needed_for_analysis,
+            old_files_needed_for_analysis,
+            log_file_path,
+            exit_code_path)
+
+        # write the sbatch script to disk
+        sbatch_script_file = self.write_sbatch_script(workflow_subtask, sbatch_script)
+
+        job_identifier = self.job_identifier(workflow_subtask)
+        LOG.info("Queueing sbatch file {} for job {}".format(sbatch_script_file, job_identifier))
+
+        # queue the sbatch file
+        p_handle = self.filesystem_handler.execute_command_line(
+            "sbatch {}".format(sbatch_script_file),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        p_out, p_err = p_handle.communicate()
+
+        # parse the slurm job_id from stdout
+        try:
+            slurm_job_id = re.match(r'Submitted batch job (\d+)', p_out).groups()[0]
+        except AttributeError:
+            raise RuntimeError(
+                "Could not submit sbatch job for workflow \"{}\": {}".format(job_identifier, p_err))
+
+        # write details which seqruns we've started analyzing so we can update statuses later
+        self.record_analysis_details(workflow_subtask)
+
+        return {"slurm_job_id": int(slurm_job_id)}
 
     def submitted_job_status(self, *args):
         if self.exec_mode == "sbatch":
@@ -333,94 +499,15 @@ class PiperLauncher(object):
                 time.sleep(2)
         raise RuntimeError("slurm job id {} cannot be found".format(slurm_job_id))
 
-    def create_sbatch_script(self, command_list, workflow_subtask, files_needed_for_analysis, log_file_path, exit_code_path):
-        # assert that we have a project id for slurm
-        try:
-            slurm_project_id = self.config["environment"]["project_id"]
-        except KeyError:
-            raise RuntimeError(
-                "No SLURM project id specified in configuration file for project/sample {}/{}".format(
-                    self.project_obj, self.sample_obj))
-
-        # Paths to the various data directories
-        local_analysis_dir = os.path.join(self.project_analysis_directory, "piper_ngi")
-        scratch_analysis_dir = os.path.join("$SNIC_TMP", "ANALYSIS", self.project_obj.dirname, "piper_ngi")
-        scratch_data_dir = os.path.join("$SNIC_TMP", "DATA", self.project_obj.dirname)
-
-        # ensure that the analysis dir exists
-        self.filesystem_handler.safe_makedir(local_analysis_dir)
-
-        # get a list of source and destination fastq files to rsync
-        files_to_rsync = []
-        for libprep in self.sample_obj:
-            for seqrun in libprep:
-                subdir = os.path.join(
-                    self.sample_obj.dirname,
-                    libprep.dirname,
-                    seqrun.dirname)
-                for fqfile in seqrun.fastq_files:
-                    files_to_rsync.append(
-                        [os.path.join(self.project_data_directory, subdir, fqfile),
-                         os.path.join(scratch_data_dir, subdir, fqfile)])
-
-        if not files_to_rsync:
-            raise ValueError(
-                "No valid fastq files available to process for project/sample {}/{}".format(
-                    self.project_obj, self.sample_obj))
-
-        # also, copy chip genotype files
-        if self.project_obj.chip_genotypes:
-            for chip_genotype in self.project_obj.chip_genotypes:
-                files_to_rsync.append([
-                    os.path.join(self.project_data_directory, chip_genotype.name),
-                    os.path.join(scratch_data_dir, chip_genotype.name)])
-
-        rsync_fastq_file_statements = list(set(
-            map(
-                lambda x: "mkdir -p {}".format(os.path.dirname(x[1])),
-                files_to_rsync)))
-        rsync_fastq_file_statements.extend(
-            map(
-                lambda x: "rsync -rptoDLv {} {}".format(x[0], x[1]),
-                files_to_rsync))
-
-        rsync_preexisting_results_statement = [
-            "echo -ne '\\n\\nCopying pre-existing analysis files at '$(date)",
-            "mkdir -p {}".format(scratch_analysis_dir),
-            "rsync -rptoDLv {} {}".format(
-                " ".join(files_needed_for_analysis),
-                scratch_analysis_dir),
-            "echo -ne '\\n\\nDeleting pre-existing analysis files at '$(date)",
-            "rm -rf {}".format(files_needed_for_analysis)
-        ] if files_needed_for_analysis else []
-
-        sbatch_parameters = {
-            "slurm_project_id": slurm_project_id,
-            "slurm_queue": self.config.get("slurm", {}).get("queue", "core"),
-            "num_cores": self.config.get("slurm", {}).get("cores", "16"),
-            "slurm_time": self.config.get("piper", {}).get("job_walltime", {}).get(workflow_subtask, "10-00:00:00"),
-            "sbatch_extra_params": "\n".join(
-                map(
-                    lambda (k, v): "#SBATCH {} {}".format(k, v),
-                    self.config.get("slurm", {}).get("extra_params", {}).items())),
-            "load_module_statements": "\n".join(
-                map(
-                    lambda x: "module load {}".format(x),
-                    self.config.get("piper", {}).get("load_modules", []))),
-            "rsync_fastq_file_statements": "\n".join(rsync_fastq_file_statements),
-            "rsync_preexisting_results_statement": "\n".join(rsync_preexisting_results_statement),
-            "command_line_statements": "\n".join(command_list),
-            "checksum_calculation_statements": "",
-            "rsync_analysis_results_statements": "rsync -rptoDLv {}{} {}{}".format(
-                scratch_analysis_dir, os.path.sep, local_analysis_dir, os.path.sep),
-            "piper_status_file": exit_code_path
-        }
-
-        for log_stream in ["out", "err"]:
-            log_file = log_file_path.replace(".log", "_sbatch.{}".format(log_stream))
-            filesystem.rotate_file(log_file)
-            sbatch_parameters["slurm_{}_log".format(log_stream)] = log_file
-
+    def write_sbatch_script(self, workflow_subtask, sbatch_script):
+        sbatch_outfile = os.path.join(
+            self.piper_analysis_directory, "sbatch", "{}.sbatch".format(
+                self.job_identifier(workflow_subtask)))
+        self.filesystem_handler.safe_makedir(os.path.dirname(sbatch_outfile))
+        self.rotate_log_file(sbatch_outfile)
+        with open(sbatch_outfile, 'w') as f:
+            f.write(sbatch_script)
+        return sbatch_outfile
 
 
 @classes.with_ngi_config
@@ -490,6 +577,9 @@ def sbatch_script_template():
 
     PIPER_RETURN_CODE=$?
 
+    echo -ne "
+
+    Calculating checksums for selected files at $(date)"
     {checksum_calculation_statements}
 
     echo -ne "
@@ -513,165 +603,3 @@ def sbatch_script_template():
         echo 2 > {piper_status_file}
     fi
     """
-
-@classes.with_ngi_config
-def sbatch_piper_sample(command_line_list, workflow_name, project, sample,
-                        libprep=None, restart_finished_jobs=False, files_to_copy=None,
-                        config=None, config_file_path=None):
-    """sbatch a piper sample-level workflow.
-
-    :param list command_line_list: The list of command lines to execute (in order)
-    :param str workflow_name: The name of the workflow to execute
-    :param NGIProject project: The NGIProject
-    :param NGISample sample: The NGISample
-    :param dict config: The parsed configuration file (optional)
-    :param str config_file_path: The path to the configuration file (optional)
-    """
-    job_identifier = "{}-{}-{}".format(project.project_id, sample, workflow_name)
-    # Paths to the various data directories
-    project_dirname = project.dirname
-    perm_analysis_dir = os.path.join(project.base_path, "ANALYSIS", project_dirname, "piper_ngi", "")
-    scratch_analysis_dir = os.path.join("$SNIC_TMP/ANALYSIS/", project_dirname, "piper_ngi", "")
-    #ensure that the analysis dir exists
-    filesystem.safe_makedir(perm_analysis_dir)
-    try:
-        slurm_project_id = config["environment"]["project_id"]
-    except KeyError:
-        raise RuntimeError('No SLURM project id specified in configuration file '
-                           'for job "{}"'.format(job_identifier))
-    slurm_queue = config.get("slurm", {}).get("queue") or "core"
-    num_cores = config.get("slurm", {}).get("cores") or 16
-    slurm_time = config.get("piper", {}).get("job_walltime", {}).get(workflow_name) or "4-00:00:00"
-    slurm_out_log = os.path.join(perm_analysis_dir, "logs", "{}_sbatch.out".format(job_identifier))
-    slurm_err_log = os.path.join(perm_analysis_dir, "logs", "{}_sbatch.err".format(job_identifier))
-    for log_file in slurm_out_log, slurm_err_log:
-        filesystem.rotate_file(log_file)
-    sbatch_text = sample_runs_handler.create_sbatch_header(slurm_project_id=slurm_project_id,
-                                       slurm_queue=slurm_queue,
-                                       num_cores=num_cores,
-                                       slurm_time=slurm_time,
-                                       job_name="piper_{}".format(job_identifier),
-                                       slurm_out_log=slurm_out_log,
-                                       slurm_err_log=slurm_err_log)
-    sbatch_text_list = sbatch_text.split("\n")
-    sbatch_extra_params = config.get("slurm", {}).get("extra_params", {})
-    for param, value in sbatch_extra_params.iteritems():
-        sbatch_text_list.append("#SBATCH {} {}\n\n".format(param, value))
-    modules_to_load = config.get("piper", {}).get("load_modules", [])
-    if modules_to_load:
-        sbatch_text_list.append("\n# Load required modules for Piper")
-        for module_name in modules_to_load:
-            sbatch_text_list.append("module load {}".format(module_name))
-
-    # Fastq files to copy
-    fastq_src_dst_list = []
-    directories_to_create = set()
-    for libprep in sample:
-        for seqrun in libprep:
-            project_specific_path = os.path.join(project.dirname,
-                                                     sample.dirname,
-                                                     libprep.dirname,
-                                                     seqrun.dirname)
-            directories_to_create.add(os.path.join("$SNIC_TMP/DATA/",
-                                                       project_specific_path))
-            for fastq in seqrun.fastq_files:
-                src_file = os.path.join(project.base_path, "DATA",
-                                            project_specific_path, fastq)
-                dst_file = os.path.join("$SNIC_TMP/DATA/",
-                                            project_specific_path,
-                                            fastq)
-                fastq_src_dst_list.append([src_file, dst_file])
-
-    sbatch_text_list.append("echo -ne '\\n\\nCopying fastq files at '")
-    sbatch_text_list.append("date")
-    if fastq_src_dst_list:
-        for directory in directories_to_create:
-            sbatch_text_list.append("mkdir -p {}".format(directory))
-        for src_file, dst_file in fastq_src_dst_list:
-            sbatch_text_list.append("rsync -rptoDLv {} {}".format(src_file, dst_file))
-    else:
-        raise ValueError(('No valid fastq files available to process for '
-                          'project/sample {}/{}'.format(project, sample)))
-
-    # Pre-existing analysis files
-    if files_to_copy:
-        sbatch_text_list.append("echo -ne '\\n\\nCopying pre-existing analysis files at '")
-        sbatch_text_list.append("date")
-
-        sbatch_text_list.append("if [ ! -d {output directory} ]; then")
-        sbatch_text_list.append("mkdir {output directory} ")
-        sbatch_text_list.append("fi")
-        sbatch_text_list.append(("rsync -rptoDLv {input_files} "
-                                 "{output_directory}/").format(input_files=" ".join(files_to_copy),
-                                                               output_directory=scratch_analysis_dir))
-        # Delete pre-existing analysis files after copy
-        sbatch_text_list.append("echo -ne '\\n\\nDeleting pre-existing analysis files at '")
-        sbatch_text_list.append("date")
-        sbatch_text_list.append("rm -rf {input_files}".format(input_files=" ".join(files_to_copy)))
-
-    sbatch_text_list.append("echo -ne '\\n\\nExecuting command lines at '")
-    sbatch_text_list.append("date")
-    sbatch_text_list.append("# Run the actual commands")
-    for command_line in command_line_list:
-        sbatch_text_list.append(command_line)
-
-
-    piper_status_file = sample_runs_handler.create_exit_code_file_path(workflow_subtask=workflow_name,
-                                                   project_base_path=project.base_path,
-                                                   project_name=project.dirname,
-                                                   project_id=project.project_id,
-                                                   sample_id=sample.name)
-    sbatch_text_list.append("\nPIPER_RETURN_CODE=$?")
-
-    #Precalcuate md5sums
-    sbatch_text_list.append('MD5FILES="$SNIC_TMP/ANALYSIS/{}/piper_ngi/05_processed_alignments/*.bam'.format(project.project_id))
-    sbatch_text_list.append('$SNIC_TMP/ANALYSIS/{}/piper_ngi/05_processed_alignments/*.table'.format(project.project_id))
-    sbatch_text_list.append('$SNIC_TMP/ANALYSIS/{}/piper_ngi/07_variant_calls/*.genomic.vcf.gz'.format(project.project_id))
-    sbatch_text_list.append('$SNIC_TMP/ANALYSIS/{}/piper_ngi/07_variant_calls/*.annotated.vcf.gz"'.format(project.project_id))
-    sbatch_text_list.append('for f in $MD5FILES')
-    sbatch_text_list.append('do')
-    sbatch_text_list.append("    md5sum $f | awk '{printf $1}' > $f.md5 &")
-    sbatch_text_list.append('done')
-    sbatch_text_list.append('wait')
-    
-    #Copying back files
-    sbatch_text_list.append("echo -ne '\\n\\nCopying back the resulting analysis files at '")
-    sbatch_text_list.append("date")
-    sbatch_text_list.append("mkdir -p {}".format(perm_analysis_dir))
-    sbatch_text_list.append("rsync -rptoDLv {}/ {}/".format(scratch_analysis_dir, perm_analysis_dir))
-    sbatch_text_list.append("\nRSYNC_RETURN_CODE=$?")
-
-    # Record job completion status
-    sbatch_text_list.append("if [[ $RSYNC_RETURN_CODE == 0 ]]")
-    sbatch_text_list.append("then")
-    sbatch_text_list.append("  if [[ $PIPER_RETURN_CODE == 0 ]]")
-    sbatch_text_list.append("  then")
-    sbatch_text_list.append("    echo '0'> {}".format(piper_status_file))
-    sbatch_text_list.append("  else")
-    sbatch_text_list.append("    echo '1'> {}".format(piper_status_file))
-    sbatch_text_list.append("  fi")
-    sbatch_text_list.append("else")
-    sbatch_text_list.append("  echo '2'> {}".format(piper_status_file))
-    sbatch_text_list.append("fi")
-
-    # Write the sbatch file
-    sbatch_dir = os.path.join(perm_analysis_dir, "sbatch")
-    filesystem.safe_makedir(sbatch_dir)
-    sbatch_outfile = os.path.join(sbatch_dir, "{}.sbatch".format(job_identifier))
-    filesystem.rotate_file(sbatch_outfile)
-    with open(sbatch_outfile, 'w') as f:
-        f.write("\n".join(sbatch_text_list))
-    LOG.info("Queueing sbatch file {} for job {}".format(sbatch_outfile, job_identifier))
-    # Queue the sbatch file
-    p_handle = filesystem.execute_command_line("sbatch {}".format(sbatch_outfile),
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE)
-    p_out, p_err = p_handle.communicate()
-    try:
-        slurm_job_id = re.match(r'Submitted batch job (\d+)', p_out).groups()[0]
-    except AttributeError:
-        raise RuntimeError('Could not submit sbatch job for workflow "{}": '
-                           '{}'.format(job_identifier, p_err))
-    # Detail which seqruns we've started analyzing so we can update statuses later
-    sample_runs_handler.record_analysis_details(project, job_identifier)
-    return int(slurm_job_id)
