@@ -305,31 +305,31 @@ class PiperLauncher(object):
 
         # set up syncing and removal of previous analysis results, if applicable
         rsync_preexisting_results_statement = """
-            echo -ne "
+echo -ne "
 
-            Copying pre-existing analysis files at $(date)"
-            mkdir -p {scratch_analysis_dir}
-            rsync -rptoDLv {files_on_source} {scratch_analysis_dir}
-            echo -ne "
+Copying pre-existing analysis files at $(date)"
+mkdir -p {scratch_analysis_dir}
+rsync -rptoDLv {files_on_source} {scratch_analysis_dir}
+echo -ne "
 
-            Deleting pre-existing analysis files at $(date)"
-            rm -rf {files_on_source}
+Deleting pre-existing analysis files at $(date)"
+rm -rf {files_on_source}
         """.format(**{
             "scratch_analysis_dir": scratch_analysis_dir,
             "files_on_source": " ".join(old_files_needed_for_analysis)}) if old_files_needed_for_analysis else ""
 
         # calculate checksums of the large files
         checksum_calculation_statements = """
-            for f in $(find {scratch_analysis_dir} -type f -size +100M)
-            do
-              md5sum $f |awk '{{printf $1}}' > $f.md5 &
-            done
-            wait
-        """.format(scratch_analysis_dir)
+for f in $(find {scratch_analysis_dir} -type f -size +100M)
+do
+  md5sum $f |awk '{{printf $1}}' > $f.md5 &
+done
+wait
+        """.format(scratch_analysis_dir=scratch_analysis_dir)
 
         # set up syncing the analysis folder back
         rsync_analysis_results_statements = """
-            rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
+rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
         """.format(**{
             "local_analysis_dir": self.piper_analysis_directory,
             "scratch_analysis_dir": scratch_analysis_dir,
@@ -340,7 +340,9 @@ class PiperLauncher(object):
             "slurm_project_id": slurm_project_id,
             "slurm_queue": self.config.get("slurm", {}).get("queue", "core"),
             "num_cores": self.config.get("slurm", {}).get("cores", "16"),
+            "num_nodes": self.config.get("slurm", {}).get("nodes", "1"),
             "slurm_time": self.config.get("piper", {}).get("job_walltime", {}).get(workflow_subtask, "10-00:00:00"),
+            "job_name": "piper_{}".format(self.job_identifier(workflow_subtask)),
             "sbatch_extra_params": "\n".join(
                 map(
                     lambda (k, v): "#SBATCH {} {}".format(k, v),
@@ -545,61 +547,61 @@ def analyze(project, sample,
 
 def sbatch_script_template():
     return """
-    #!/bin/bash -l
+#!/bin/bash -l
 
-    #SBATCH -A {slurm_project_id}
-    #SBATCH -p {slurm_queue}
-    #SBATCH -n {num_cores}
-    #SBATCH -N {num_nodes}
-    #SBATCH -t {slurm_time}
-    #SBATCH -J {job_name}
-    #SBATCH -o {slurm_out_log}
-    #SBATCH -e {slurm_err_log}
-    {extra_sbatch_parameters}
+#SBATCH -A {slurm_project_id}
+#SBATCH -p {slurm_queue}
+#SBATCH -n {num_cores}
+#SBATCH -N {num_nodes}
+#SBATCH -t {slurm_time}
+#SBATCH -J {job_name}
+#SBATCH -o {slurm_out_log}
+#SBATCH -e {slurm_err_log}
+{sbatch_extra_params}
 
-    # Load required modules for Piper
-    {load_module_statements}
+# Load required modules for Piper
+{load_module_statements}
 
-    echo -ne "
+echo -ne "
 
-    Copying fastq files at $(date)"
+Copying fastq files at $(date)"
 
-    {rsync_fastq_file_statements}
+{rsync_fastq_file_statements}
 
-    {rsync_preexisting_results_statement}
+{rsync_preexisting_results_statement}
 
-    echo -ne "
+echo -ne "
 
-    Executing command lines at $(date)"
+Executing command lines at $(date)"
 
-    # Run the actual commands
-    {command_line_statements}
+# Run the actual commands
+{command_line_statements}
 
-    PIPER_RETURN_CODE=$?
+PIPER_RETURN_CODE=$?
 
-    echo -ne "
+echo -ne "
 
-    Calculating checksums for selected files at $(date)"
-    {checksum_calculation_statements}
+Calculating checksums for selected files at $(date)"
+{checksum_calculation_statements}
 
-    echo -ne "
+echo -ne "
 
-    Copying back the resulting analysis files at $(date)"
+Copying back the resulting analysis files at $(date)"
 
-    {rsync_analysis_results_statements}
+{rsync_analysis_results_statements}
 
-    RSYNC_RETURN_CODE=$?
+RSYNC_RETURN_CODE=$?
 
-    # Record job completion status
-    if [[ $RSYNC_RETURN_CODE == 0 ]]
+# Record job completion status
+if [[ $RSYNC_RETURN_CODE == 0 ]]
+then
+    if [[ $PIPER_RETURN_CODE == 0 ]]
     then
-        if [[ $PIPER_RETURN_CODE == 0 ]]
-        then
-            echo 0 > {piper_status_file}
-        else
-            echo 1 > {piper_status_file}
-        fi
+        echo 0 > {piper_status_file}
     else
-        echo 2 > {piper_status_file}
+        echo 1 > {piper_status_file}
     fi
+else
+    echo 2 > {piper_status_file}
+fi
     """

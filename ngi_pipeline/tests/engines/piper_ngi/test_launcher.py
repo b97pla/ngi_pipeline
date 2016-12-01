@@ -290,6 +290,66 @@ class TestPiperLauncher(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.launcher.determine_seqruns_to_be_analyzed()
 
+    def test_generate_sbatch_script(self):
+        test_command_list = [
+            "this is a first example command",
+            "this is a second example command",
+            "this is a third example command"]
+        test_workflow_subtask = "test-workflow-subtask"
+        test_files_needed_for_analysis = [
+            os.path.join("path", "to", "input", "file", "1"),
+            os.path.join("path", "to", "input", "file", "2"),
+            os.path.join("path", "to", "input", "file", "3"),
+            os.path.join("path", "to", "input", "file", "4")
+        ]
+        test_old_files_needed_for_analysis = [
+            os.path.join("path", "to", "old", "file", "1"),
+            os.path.join("path", "to", "old", "file", "2"),
+            os.path.join("path", "to", "old", "file", "3"),
+            os.path.join("path", "to", "old", "file", "4")
+        ]
+        test_log_file_path = os.path.join("path", "to", "log", "file.log")
+        test_exit_code_path = os.path.join("path", "to", "exit", "code", "file")
+        test_args = [
+            test_command_list,
+            test_workflow_subtask,
+            test_files_needed_for_analysis,
+            test_old_files_needed_for_analysis,
+            test_log_file_path,
+            test_exit_code_path]
+        test_config = {
+            "environment": {
+                "project_id": "this-is-a-test-project-id"},
+            "slurm": {
+                "queue": "this-is-the-slurm-queue",
+                "cores": "this-is-the-number-of-cores",
+                "nodes": "this-is-the-number-of-nodes",
+                "extra_params": {
+                    "extra-param-key-1": "extra-param-value-1",
+                    "extra-param-key-2": "extra-param-value-2",
+                    "extra-param-key-3": "extra-param-value-3"
+                }
+            },
+            "piper": {
+                "job_walltime": {
+                    test_workflow_subtask: "this-is-.the-piper-job-walltime"},
+                "load_modules": [
+                    "piper-module-to-load-1",
+                    "piper-module-to-load-2",
+                    "piper-module-to-load-3"
+                ]
+            }
+        }
+        self.launcher.rotate_log_file = mock.create_autospec(self.launcher.rotate_log_file)
+        # not being able to grab a project id for SLURM accounting from the config should raise an error
+        with self.assertRaises(RuntimeError):
+            self.launcher.config = {}
+            self.launcher.generate_sbatch_script(*test_args)
+        # running with proper input should produce a meaningful script
+        self.launcher.config = test_config
+        self.assertEquals(str, type(self.launcher.generate_sbatch_script(*test_args)))
+        print(self.launcher.generate_sbatch_script(*test_args))
+
     def test_get_files_from_project_obj(self):
         local_project_obj = next(self.project_data.next())
         self.assertListEqual([], self.launcher.get_files_from_project_obj(local_project_obj))
