@@ -369,7 +369,7 @@ rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
 
     @staticmethod
     def get_files_from_project_obj(local_project_obj):
-        project_files = [chip_genotype.name for chip_genotype in local_project_obj.chip_genotypes or []]
+        project_files = local_project_obj.chip_genotypes or []
         for local_sample_obj in local_project_obj:
             project_files.extend(PiperLauncher.get_files_from_sample_obj(local_sample_obj))
         return project_files

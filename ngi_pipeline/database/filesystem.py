@@ -51,9 +51,17 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                 LOG.info('Project "{}" already exists; moving to samples...'.format(project))
         else:
             raise
+    genotyped_samples = []
+    for genotype_file in [
+        os.path.join(
+            project.base_path,
+            "DATA",
+            chip_genotype.dirname,
+            chip_genotype.name) for chip_genotype in project.chip_genotypes] if project.chip_genotypes else []:
+        genotyped_samples.extend(parse_samples_from_vcf(genotype_file))
+
     for sample in project:
-        # TODO: parse genotype files and set status only on genotyped samples instead of on all samples in project
-        genotype_status = "AVAILABLE" if project.chip_genotypes is not None else None
+        genotype_status = "AVAILABLE" if sample.sample_id in genotyped_samples else None
         if delete_existing:
             LOG.warn('Deleting existing sample "{}"'.format(sample))
             try:

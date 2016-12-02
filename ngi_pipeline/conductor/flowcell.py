@@ -270,13 +270,15 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                                      project_id=project_id,
                                      base_path=analysis_top_dir,
                                      chip_genotypes=map(
-                                         lambda f: NGIChipGenotypes(name=os.path.basename(f)),
-                                         chip_genotype_files) if chip_genotype_files is not None else None)
+                                         lambda f: NGIChipGenotypes(
+                                             name=os.path.basename(f),
+                                             dirname=project_id),
+                                         chip_genotype_files) if chip_genotype_files else None)
             projects_to_analyze[project_dir] = project_obj
 
         # Create symlinks to chip genotype files in the project data dir
         if create_files:
-            if project_obj.chip_genotypes is not None:
+            if project_obj.chip_genotypes:
                 LOG.info("Symlinking chip genotype files: [{}]".format(
                     ", ".join(
                         map(os.path.basename, chip_genotype_files))))

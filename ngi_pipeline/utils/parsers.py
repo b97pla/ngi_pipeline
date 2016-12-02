@@ -24,8 +24,14 @@ STHLM_UUSNP_SAMPLE_RE = re.compile(r'(?P<project_name>\w\.\w+_\d+_\d+|\w{2}-\d+)
 
 def parse_samples_from_vcf(path_to_vcf):
     path_to_vcf = path_to_vcf.strip()
-    with open(path_to_vcf, 'r') as f:
-        for line in f:
+    with gzip.open(path_to_vcf) as fh, open(path_to_vcf, 'r') as f:
+        try:
+            fh.readline()
+        except IOError:
+            fh = f
+        else:
+            fh.seek(0)
+        for line in fh:
             if line.startswith("#CHROM"):
                 break
     header_list = line.split()
@@ -35,6 +41,7 @@ def parse_samples_from_vcf(path_to_vcf):
         raise ValueError('Improperly formatted VCF file: cannot determine '
                          'samples from file "{}"'.format(path_to_vcf))
     return header_list[samples_index+1:]
+
 
 def determine_library_prep_from_fcid(project_id, sample_name, fcid):
     """Use the information in the database to get the library prep id
