@@ -87,6 +87,7 @@ class TestPiperLauncher(unittest.TestCase):
         mock_launcher.locate_fastq_files_for_project_sample.return_value = fastq_files_for_analysis
         mock_launcher.locate_preexisting_data_to_include_in_analysis.return_value = old_files_for_analysis
         mock_launcher.create_local_copy_of_project_obj.return_value = local_project_obj
+        mock_launcher.get_files_from_project_obj.return_value = fastq_files_for_analysis
         mock_launcher.create_setup_command.return_value = (piper_setup_cmd, piper_setup_xml_path)
         mock_launcher.create_piper_command.return_value = piper_cmd
         mock_launcher.submit_commands.side_effect = submitted_job_ids
@@ -124,6 +125,7 @@ class TestPiperLauncher(unittest.TestCase):
         mock_launcher.locate_chip_genotype_files_for_project.assert_not_called()
         mock_launcher.determine_seqruns_to_be_analyzed.side_effect = None
 
+
         # a raised exception when locating files should result in a subtask being skipped
         for mocked_method in [
             mock_launcher.locate_chip_genotype_files_for_project,
@@ -151,6 +153,7 @@ class TestPiperLauncher(unittest.TestCase):
         mock_launcher.rotate_log_file.assert_called_with(log_path)
         mock_launcher.create_local_copy_of_project_obj.assert_called_with(
             fastq_files_for_analysis, chip_genotypes_for_analysis)
+        mock_launcher.get_files_from_project_obj.assert_called_with(local_project_obj)
         self.assertListEqual(
             map(lambda x: mock.call(local_project_obj, x),
                 workflow_subtasks),
@@ -160,7 +163,13 @@ class TestPiperLauncher(unittest.TestCase):
                 workflow_subtasks),
             mock_launcher.create_piper_command.call_args_list)
         self.assertListEqual(
-            map(lambda x: mock.call([piper_setup_cmd, piper_cmd], x, old_files_for_analysis),
+            map(lambda x: mock.call(
+                [piper_setup_cmd, piper_cmd],
+                x,
+                fastq_files_for_analysis,
+                old_files_for_analysis,
+                log_path,
+                exit_code_path),
                 workflow_subtasks),
             mock_launcher.submit_commands.call_args_list)
         self.assertListEqual(
@@ -340,6 +349,93 @@ class TestPiperLauncher(unittest.TestCase):
                 ]
             }
         }
+        expected_sbatch_script = """
+        #!/bin/bash -l
+
+        #SBATCH -A this-is-a-test-project-id
+        #SBATCH -p this-is-the-slurm-queue
+        #SBATCH -n this-is-the-number-of-cores
+        #SBATCH -N this-is-the-number-of-nodes
+        #SBATCH -t this-is-.the-piper-job-walltime
+        #SBATCH -J piper_Y.Mom_15_01-P1155_101-test-workflow-subtask
+        #SBATCH -o path/to/log/file_sbatch.out
+        #SBATCH -e path/to/log/file_sbatch.err
+        #SBATCH extra-param-key-2 extra-param-value-2
+        #SBATCH extra-param-key-3 extra-param-value-3
+        #SBATCH extra-param-key-1 extra-param-value-1
+
+        # Load required modules for Piper
+        module load piper-module-to-load-1
+        module load piper-module-to-load-2
+        module load piper-module-to-load-3
+
+        echo -ne "
+
+        Copying fastq files at $(date)"
+
+        mkdir -p $SNIC_TMP/DATA/Y.Mom_15_01/path/to/input/file
+        rsync -rptoDLv {base_path}/DATA/Y.Mom_15_01/path/to/input/file/1 $SNIC_TMP/DATA/Y.Mom_15_01/path/to/input/file/1
+        rsync -rptoDLv {base_path}/DATA/Y.Mom_15_01/path/to/input/file/2 $SNIC_TMP/DATA/Y.Mom_15_01/path/to/input/file/2
+        rsync -rptoDLv {base_path}/DATA/Y.Mom_15_01/path/to/input/file/3 $SNIC_TMP/DATA/Y.Mom_15_01/path/to/input/file/3
+        rsync -rptoDLv {base_path}/DATA/Y.Mom_15_01/path/to/input/file/4 $SNIC_TMP/DATA/Y.Mom_15_01/path/to/input/file/4
+
+
+        echo -ne "
+
+        Copying pre-existing analysis files at $(date)"
+        mkdir -p $SNIC_TMP/ANALYSIS/Y.Mom_15_01/piper_ngi
+        rsync -rptoDLv path/to/old/file/1 path/to/old/file/2 path/to/old/file/3 path/to/old/file/4 $SNIC_TMP/ANALYSIS/Y.Mom_15_01/piper_ngi
+        echo -ne "
+
+        Deleting pre-existing analysis files at $(date)"
+        rm -rf path/to/old/file/1 path/to/old/file/2 path/to/old/file/3 path/to/old/file/4
+
+
+        echo -ne "
+
+        Executing command lines at $(date)"
+
+        # Run the actual commands
+        this is a first example command
+        this is a second example command
+        this is a third example command
+
+        PIPER_RETURN_CODE=$?
+
+        echo -ne "
+
+        Calculating checksums for selected files at $(date)"
+
+        for f in $(find $SNIC_TMP/ANALYSIS/Y.Mom_15_01/piper_ngi -type f -size +100M)
+        do
+          md5sum $f |awk '{{printf $1}}' > $f.md5 &
+        done
+        wait
+
+
+        echo -ne "
+
+        Copying back the resulting analysis files at $(date)"
+
+
+        rsync -rptoDLv $SNIC_TMP/ANALYSIS/Y.Mom_15_01/piper_ngi/ {base_path}/ANALYSIS/Y.Mom_15_01/piper_ngi/
+
+
+        RSYNC_RETURN_CODE=$?
+
+        # Record job completion status
+        if [[ $RSYNC_RETURN_CODE == 0 ]]
+        then
+            if [[ $PIPER_RETURN_CODE == 0 ]]
+            then
+                echo 0 > path/to/exit/code/file
+            else
+                echo 1 > path/to/exit/code/file
+            fi
+        else
+            echo 2 > path/to/exit/code/file
+        fi
+        """.format(base_path=self.launcher.project_obj.base_path)
         self.launcher.rotate_log_file = mock.create_autospec(self.launcher.rotate_log_file)
         # not being able to grab a project id for SLURM accounting from the config should raise an error
         with self.assertRaises(RuntimeError):
@@ -347,8 +443,9 @@ class TestPiperLauncher(unittest.TestCase):
             self.launcher.generate_sbatch_script(*test_args)
         # running with proper input should produce a meaningful script
         self.launcher.config = test_config
-        self.assertEquals(str, type(self.launcher.generate_sbatch_script(*test_args)))
-        print(self.launcher.generate_sbatch_script(*test_args))
+        self.assertEquals(
+            expected_sbatch_script.replace(" ", ""),
+            self.launcher.generate_sbatch_script(*test_args).replace(" ", ""))
 
     def test_get_files_from_project_obj(self):
         local_project_obj = next(self.project_data.next())
