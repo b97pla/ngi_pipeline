@@ -10,8 +10,17 @@ LOG = minimal_logger(__name__)
 
 
 ## TODO change this to use local_scratch_mode boolean instead of exec_mode
-def build_piper_cl(project, workflow_name, setup_xml_path, exit_code_path,
-                   config, genotype_file=None, exec_mode="local", generate_bqsr_bam=False):
+def build_piper_cl(
+        project,
+        workflow_name,
+        setup_xml_path,
+        exit_code_path,
+        config,
+        reference_genome,
+        genotype_files=None,
+        exec_mode="local",
+        generate_bqsr_bam=False,
+        vcf_files=None):
     """Determine which workflow to run for a project and build the appropriate command line.
     :param NGIProject project: The project object to analyze.
     :param str workflow_name: The name of the workflow to execute (e.g. "dna_alignonly")
@@ -25,7 +34,7 @@ def build_piper_cl(project, workflow_name, setup_xml_path, exit_code_path,
     :raises ValueError: If a required configuration value is missing.
     """
     if exec_mode == "sbatch":
-        output_dir = os.path.join("$SNIC_TMP/ANALYSIS/", project.dirname, 'piper_ngi')
+        output_dir = os.path.join("$SNIC_TMP", "ANALYSIS", project.dirname, 'piper_ngi')
         # Can't create these directories ahead of time of course
     elif exec_mode == "local":
         output_dir = os.path.join(project.base_path, "ANALYSIS", project.dirname, 'piper_ngi')
@@ -62,18 +71,20 @@ def build_piper_cl(project, workflow_name, setup_xml_path, exit_code_path,
     cl = workflows.return_cl_for_workflow(workflow_name=workflow_name,
                                           qscripts_dir_path=piper_qscripts_dir,
                                           setup_xml_path=setup_xml_path,
-                                          genotype_file=genotype_file,
+                                          genotype_file=genotype_files,
                                           global_config_path=piper_global_config_path,
                                           output_dir=output_dir,
                                           exec_mode=exec_mode,
-                                          generate_bqsr_bam=generate_bqsr_bam)
+                                          generate_bqsr_bam=generate_bqsr_bam,
+                                          vcf_files=vcf_files,
+                                          reference_genome=reference_genome)
     # Blank out the file if it already exists
     safe_makedir(os.path.dirname(exit_code_path))
     open(exit_code_path, 'w').close()
     return cl 
 
 
-def build_setup_xml(project, sample, workflow, local_scratch_mode, config):
+def build_setup_xml(project, sample, workflow, local_scratch_mode, config, reference_genome):
     """Build the setup.xml file for each project using the CLI-interface of
     Piper's SetupFileCreator.
 
@@ -112,7 +123,6 @@ def build_setup_xml(project, sample, workflow, local_scratch_mode, config):
         cl_args["qos"] = slurm_qos
 
     # TODO Eventually this will be loaded from e.g. Charon
-    reference_genome = 'GRCh37'
     try:
         cl_args["reference_path"] = config['supported_genomes'][reference_genome]
         cl_args["uppmax_proj"] = config['environment']['project_id']
@@ -145,8 +155,11 @@ def build_setup_xml(project, sample, workflow, local_scratch_mode, config):
     for samp in project:
         for libprep in samp:
             for seqrun in libprep:
-                sample_run_directory = os.path.join(project_top_level_dir, sample.dirname,
-                                                    libprep.dirname, seqrun.dirname)
+                sample_run_directory = os.path.join(
+                    project_top_level_dir,
+                    sample.dirname,
+                    libprep.dirname,
+                    seqrun.dirname)
                 for fastq_file_name in seqrun.fastq_files:
                     fastq_file = os.path.join(sample_run_directory, fastq_file_name)
                     setupfilecreator_cl += " --input_fastq {}".format(fastq_file)

@@ -42,8 +42,9 @@ def get_subtasks_for_level(level):
 
 @with_ngi_config
 def return_cl_for_workflow(workflow_name, qscripts_dir_path, setup_xml_path, global_config_path,
-                           output_dir=None, exec_mode="local", genotype_file=None,
-                           config=None, config_file_path=None, generate_bqsr_bam=False):
+                           output_dir=None, exec_mode="local", genotype_files=None,
+                           config=None, config_file_path=None, generate_bqsr_bam=False, vcf_files=None,
+                           reference_genome=None):
     """Return an executable-ready Piper command line.
 
     :param str workflow_name: The name of the Piper workflow to be run.
@@ -71,9 +72,11 @@ def return_cl_for_workflow(workflow_name, qscripts_dir_path, setup_xml_path, glo
                              setup_xml_path=setup_xml_path,
                              global_config_path=global_config_path,
                              config=config, exec_mode=exec_mode,
-                             genotype_file=genotype_file,
+                             genotype_files=genotype_files,
                              output_dir=output_dir,
-                             generate_bqsr_bam=generate_bqsr_bam)
+                             generate_bqsr_bam=generate_bqsr_bam,
+                             vcf_files=vcf_files,
+                             reference_genome=reference_genome)
 
 #def workflow_dna_alignonly(*args, **kwargs):
 #    """Return the command line for basic DNA Alignment.
@@ -155,9 +158,15 @@ def workflow_dna_variantcalling(qscripts_dir_path, setup_xml_path, global_config
     return cl_string.format(**locals())
 
 
-def workflow_genotype_concordance(qscripts_dir_path, setup_xml_path,
-                                  global_config_path, genotype_file,
-                                  config, output_dir=None, *args, **kwargs):
+def workflow_genotype_concordance(qscripts_dir_path,
+                                  global_config_path,
+                                  config,
+                                  genotype_files=None,
+                                  vcf_files=None,
+                                  output_dir=None,
+                                  reference_genome=None,
+                                  *args,
+                                  **kwargs):
     """Return the command line for genotype concordance checking.
 
     :param str qscripts_dir_path: The path to the Piper qscripts directory.
@@ -167,19 +176,32 @@ def workflow_genotype_concordance(qscripts_dir_path, setup_xml_path,
     :param dict config: The parsed ngi_pipeline config file
     :param str output_dir: The path to the desired output directory
     """
-    cl_string = PIPER_CL_TEMPLATE
-    workflow_qscript_path = os.path.join(qscripts_dir_path, "DNABestPracticeVariantCalling.scala")
-    job_walltime = slurm_time_to_seconds(config.get("slurm", {}).get("time") or "4-00:00:00")
-    num_threads = int(config.get("piper", {}).get("threads") or 8)
-    job_runner = "Shell"
-    scatter_gather = 1
-    if output_dir:
-        cl_string += " --output_directory {output_dir}"
-    # disable GATK phone home if the license file is present
-    gatk_key = config.get("piper", {}).get("gatk_key", None)
-    if gatk_key and os.path.exists(gatk_key):
-        cl_string += " --gatk_key {gatk_key}"
-    cl_string += " --alignment_and_qc"
-    cl_string += " --retry_failed 2"
-    cl_string += " --genotypes {}".format(genotype_file)
-    return cl_string.format(**locals())
+    cl_string = "piper -S " \
+                "{qscript} " \
+                "{genotype_files} " \
+                "{vcf_files} " \
+                "--outputdir {output_dir} " \
+                "--projectid {project_id} " \
+                "--reference {reference} " \
+                "--number_of_threads {num_threads} " \
+                "{gatk_key} " \
+                "--global_config {global_config_path}"
+    variables = {
+        "qscript": os.path.join(qscripts_dir_path, "GenotypeConcordance.scala"),
+        "genotype_files": "--genotypes ".join(genotype_files),
+        "vcf_files": "--vcffile ".join(vcf_files),
+        "output_dir": output_dir,
+        "project_id": config["environment"]["project_id"],
+        "reference": config['supported_genomes'][reference_genome],
+        "num_threads": int(config["piper"].get("threads", 2)),
+        "gatk_key": "",
+        "global_config_path": global_config_path
+    }
+    try:
+        key = config["piper"]["gatk_key"]
+        if os.path.exists(key):
+            variables["gatk_key"] = "--gatk_key {}".format(key)
+    except KeyError:
+        pass
+
+    return cl_string.format(**variables)

@@ -222,12 +222,10 @@ if __name__ == "__main__":
     # Add sub-subparser for project genotyping
     genotype_project = subparsers_genotype.add_parser('project',
             help="Start genotype analysis for all samples in a project")
-    genotype_project.add_argument("genotype_project_dirs", nargs="*",
+    genotype_project.add_argument("genotype_project_dirs", nargs="+",
             help=("The path to one or more pre-parsed project directories to "
                   "run through genotype concordance analysis. If not specified, "
                   "all samples in vcf file are genotyped if possible. (Optional)"))
-    genotype_project.add_argument("-g", "--genotype-file", action="store", required=True,
-            help="The path to the genotype VCF file.")
     genotype_project.add_argument("-k", "--keep-existing-data", action="store_true",
             help="Keep/re-use existing analysis data when launching new analyses.")
     # Add sub-subparser for sample genotyping
@@ -483,42 +481,20 @@ if __name__ == "__main__":
 
     elif 'genotype_project_dirs' in args:
         from ngi_pipeline.engines import piper_ngi
-        genotype_file_path = args.genotype_file
-        project_obj_list = []
-        if not args.genotype_project_dirs:
-            LOG.info('No projects specified; running genotype analysis for all '
-                     'samples present in VCF file.')
-            # User passed only the genotype file; try to determine samples/projects
-            # from vcf file
-            projects_samples_dict = \
-                    find_projects_from_samples(parse_samples_from_vcf(genotype_file_path))
-            for project_id, samples in projects_samples_dict.iteritems():
-                try:
-                    path_to_project = locate_project(project_id)
-                except ValueError:
-                    # Project has not yet been organized from flowcell level
-                    LOG.warn('Project "{}" has not yet been organized from '
-                             'flowcell to project level; skipping.'.format(project_id))
-                    continue
-                project = recreate_project_from_filesystem(project_dir=path_to_project,
-                                                           restrict_to_samples=samples)
-                project_obj_list.append(project)
-        else:
-            for genotype_project_dir in args.genotype_project_dirs:
-                LOG.info("Starting genotype analysis of project {} with genotype "
-                         "file {}".format(genotype_project_dir, genotype_file_path))
-                project = recreate_project_from_filesystem(project_dir=genotype_project_dir,
-                                                           restrict_to_samples=args.restrict_to_samples)
-                project_obj_list.append(project)
-        for project in project_obj_list:
-            for sample in project:
-                piper_ngi.launchers.analyze(project, sample,
-                                            genotype_file=genotype_file_path,
-                                            restart_finished_jobs=args.restart_finished_jobs,
-                                            restart_running_jobs=args.restart_running_jobs,
-                                            keep_existing_data=args.keep_existing_data,
-                                            level="genotype")
 
+        for genotype_project_dir in args.genotype_project_dirs:
+            project_obj = recreate_project_from_filesystem(
+                project_dir=genotype_project_dir,
+                restrict_to_samples=args.restrict_to_samples)
+            LOG.info("Starting genotype analysis of project {}".format(genotype_project_dir))
+            for sample_obj in project_obj:
+                launcher_obj = piper_ngi.launchers.analyze(
+                    project_obj,
+                    sample_obj,
+                    restart_finished_jobs=args.restart_finished_jobs,
+                    restart_running_jobs=args.restart_running_jobs,
+                    keep_existing_data=args.keep_existing_data,
+                    level="genotype")
     ## Server
     elif 'port' in args:
         LOG.info('Starting ngi_pipeline server at port {}'.format(args.port))

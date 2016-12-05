@@ -141,7 +141,7 @@ def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype
         sample_obj=sample_obj)
 
 
-def remove_previous_genotype_analyses(project_obj):
+def remove_previous_genotype_analyses(project_obj, sample_obj=None):
     """Remove genotype concordance analysis results for a sample, including
     .failed and .done files.
     Doesn't throw an error if it can't read a directory, but does if it can't
@@ -152,7 +152,7 @@ def remove_previous_genotype_analyses(project_obj):
     :returns: Nothing
     :rtype: None
     """
-    _remove_existing_analysis_results(project_obj, analysis_type="genotype")
+    _remove_existing_analysis_results(project_obj, sample_obj, analysis_type="genotype")
 
 
 def remove_previous_sample_analyses(project_obj, sample_obj=None):

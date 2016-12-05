@@ -57,6 +57,7 @@ class PiperLauncher(object):
         self.project_analysis_directory = os.path.join(self.project_obj.base_path, "ANALYSIS", self.project_obj.dirname)
         self.sample_data_directory = os.path.join(self.project_data_directory, self.sample_obj.dirname)
         self.piper_analysis_directory = os.path.join(self.project_analysis_directory, "piper_ngi")
+        self.reference_genome = "GRCh37"
 
     def analyze(self):
         # get the list of workflow subtasks to perform
@@ -131,7 +132,7 @@ class PiperLauncher(object):
 
             # create the piper command
             piper_command = self.create_piper_command(
-                local_project_obj, workflow_subtask, setup_xml_path, exit_code_path)
+                local_project_obj, workflow_subtask, chip_genotypes_for_analysis, setup_xml_path, exit_code_path)
 
             # submit the commands for execution
             submitted_job_id = self.submit_commands(
@@ -186,9 +187,10 @@ class PiperLauncher(object):
     def clean_previous_analysis_results(self):
         if not self.keep_existing_data:
             if self.level == "sample":
-                self.preexisting_sample_runs_handler.remove_previous_sample_analyses(self.project_obj, self.sample_obj)
-            else:
-                self.preexisting_sample_runs_handler.remove_previous_genotype_analyses(self.project_obj)
+                clean_fn = self.preexisting_sample_runs_handler.remove_previous_sample_analyses
+            else
+                clean_fn = self.preexisting_sample_runs_handler.remove_previous_genotype_analyses
+            clean_fn(self.project_obj, self.sample_obj)
 
     def create_exit_code_path(self, workflow_subtask):
         return self.sample_runs_handler.create_exit_code_file_path(
@@ -234,7 +236,14 @@ class PiperLauncher(object):
             self.project_obj.project_id,
             sample_id=self.sample_obj.name)
 
-    def create_piper_command(self, local_project_obj, workflow_subtask, setup_xml_path, exit_code_path):
+    def create_piper_command(
+            self,
+            local_project_obj,
+            workflow_subtask,
+            genotype_files,
+            vcf_files,
+            setup_xml_path,
+            exit_code_path):
         return self.command_handler.build_piper_cl(
             project=local_project_obj,
             workflow_name=workflow_subtask,
@@ -242,15 +251,19 @@ class PiperLauncher(object):
             exit_code_path=exit_code_path,
             config=self.config,
             exec_mode=self.exec_mode,
-            generate_bqsr_bam=self.generate_bqsr_bam)
+            generate_bqsr_bam=self.generate_bqsr_bam,
+            reference_genome=self.reference_genome)
 
     def create_setup_command(self, local_project_obj, workflow_subtask):
+        if self.level == "genotype":
+            return ""
         return self.command_handler.build_setup_xml(
             local_project_obj,
             next(local_project_obj),
             workflow_subtask,
             self.exec_mode == "sbatch",
-            self.config)
+            self.config,
+            self.reference_genome)
 
     def determine_seqruns_to_be_analyzed(self, include_failed_libpreps=False):
         valid_seqruns = self.preexisting_sample_runs_handler.get_valid_seqruns_for_sample(
@@ -396,6 +409,8 @@ rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
         return chip_genotype_files if chip_genotype_files else None
 
     def locate_fastq_files_for_project_sample(self, realpath=False, valid_seqruns=None):
+        if self.level = "genotype":
+            return []
         fastq_files = self.filesystem_handler.fastq_files_under_dir(
             self.sample_data_directory, realpath=realpath)
         if not fastq_files:
