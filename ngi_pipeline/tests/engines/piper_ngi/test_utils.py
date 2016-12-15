@@ -122,7 +122,9 @@ class ProjectData():
             "07_this_is_genotype_calls": [
                 ".clean.dedup.recal.raw.genomic.gvcf.gz",
                 ".clean.dedup.recal.raw.genomic.raw.vcf.gz",
-                ".clean.dedup.recal.raw.genomic.raw.vcf.gz.tbi"
+                ".clean.dedup.recal.raw.genomic.raw.vcf.gz.tbi",
+                ".clean.dedup.recal.raw.snp.vcf",
+                ".clean.dedup.recal.raw.snp.vcf.tbi"
             ],
             "08_this_is_miscallaneous_files": [],
             "logs": [
@@ -240,7 +242,8 @@ class TestPreviousSampleAnalyses(unittest.TestCase):
                     self.created_files[proj_obj.project_id][sample_obj.name])
                 self.assertItemsEqual(
                     existing_files,
-                    ngi_pipeline.engines.piper_ngi.utils.find_previous_sample_analyses(proj_obj, sample_obj, include_genotype_files=True))
+                    ngi_pipeline.engines.piper_ngi.utils.find_previous_sample_analyses(
+                        proj_obj, sample_obj, include_genotype_files=True))
                 # keep the existing_files for the final test
                 all_existing_files.extend(existing_files)
             # filter out the genotyping files for the final test
@@ -249,8 +252,29 @@ class TestPreviousSampleAnalyses(unittest.TestCase):
                 all_existing_files)
             self.assertItemsEqual(
                 all_existing_files,
-                ngi_pipeline.engines.piper_ngi.utils.find_previous_sample_analyses(proj_obj, sample_obj=None, include_genotype_files=False),
+                ngi_pipeline.engines.piper_ngi.utils.find_previous_sample_analyses(
+                    proj_obj, sample_obj=None, include_genotype_files=False),
                 "find_previous_sample_analyses did not return expected files for {}".format(proj_obj.project_id))
+
+    def test_find_previous_variantcall_analyses(self):
+        for proj_obj in self.project_data_objects.next():
+            all_existing_files = []
+            for sample_obj in proj_obj.samples.values():
+                existing_files = filter(
+                    lambda x: os.path.basename(
+                        os.path.dirname(x)).endswith("variant_calls") and (
+                        x.endswith(".vcf.gz") or x.endswith(".vcf")),
+                    self.created_files[proj_obj.project_id][sample_obj.name])
+                self.assertItemsEqual(
+                    existing_files,
+                    ngi_pipeline.engines.piper_ngi.utils.find_previous_variantcall_analyses(proj_obj, sample_obj))
+                # keep the existing_files for the final test
+                all_existing_files.extend(existing_files)
+            # find all files regardless of sample
+            self.assertItemsEqual(
+                all_existing_files,
+                ngi_pipeline.engines.piper_ngi.utils.find_previous_variantcall_analyses(proj_obj, sample_obj=None),
+                "find_previous_variantcall_analyses did not return expected files for {}".format(proj_obj.project_id))
 
     def _remove_previous_type_analyses(self, result_type):
 

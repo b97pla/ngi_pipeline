@@ -71,7 +71,10 @@ class TestPiperLauncher(unittest.TestCase):
             os.path.join("path", "to", "libprep2", "seqrun22", "fastq_file2")]
         old_files_for_analysis = [
             os.path.join("path", "to", "old", "file1"),
-            os.path.join("path", "to", "old", "file2")]
+            os.path.join("path", "to", "old", "file2")],
+        vcf_files = [
+            os.path.join("path", "to", "vcf", "file1"),
+            os.path.join("path", "to", "vcf", "file2")],
         exit_code_path = os.path.join("path", "to", "exit", "code", "file")
         log_path = os.path.join("path", "to", "log", "file")
         local_project_obj = self.launcher.project_obj
@@ -138,7 +141,7 @@ class TestPiperLauncher(unittest.TestCase):
             mocked_method.side_effect = None
 
         # now, executing the analyze method should return job ids for the workflows
-        mock_launcher.locate_fastq_files_for_project_sample.reset_mock()
+            mock_launcher.locate_fastq_files_for_project_sample.reset_mock()
         self.assertListEqual(list(submitted_job_ids), mock_launcher.analyze())
         # do a bunch of assertions on the method calls
         self.assertListEqual(
@@ -159,7 +162,14 @@ class TestPiperLauncher(unittest.TestCase):
                 workflow_subtasks),
             mock_launcher.create_setup_command.call_args_list)
         self.assertListEqual(
-            map(lambda x: mock.call(local_project_obj, x, piper_setup_xml_path, exit_code_path),
+            map(lambda x: mock.call(
+                    local_project_obj,
+                    x,
+                    chip_genotypes_for_analysis,
+                    # this is just temporary, should be vcf_files
+                    old_files_for_analysis,
+                    piper_setup_xml_path,
+                    exit_code_path),
                 workflow_subtasks),
             mock_launcher.create_piper_command.call_args_list)
         self.assertListEqual(
@@ -446,6 +456,10 @@ class TestPiperLauncher(unittest.TestCase):
         self.assertEquals(
             expected_sbatch_script.replace(" ", ""),
             self.launcher.generate_sbatch_script(*test_args).replace(" ", ""))
+        self.launcher.level = "genotype"
+        test_args[3] = test_args[2]
+        test_args[2] = []
+        print(self.launcher.generate_sbatch_script(*test_args))
 
     def test_get_files_from_project_obj(self):
         local_project_obj = next(self.project_data.next())
@@ -508,12 +522,17 @@ class TestPiperLauncher(unittest.TestCase):
                 valid_seqruns=valid_seqruns))
 
     def test_locate_preexisting_data_to_include_in_analysis(self):
-        expected_analysis_results = ["this", "is", "some", "data", "files"]
+        expected_analysis_results = {"sample": ["this", "is", "some", "sample", "files"],
+                                     "genotype": ["this", "is", "some", "variantcall", "files"]}
         self.launcher.preexisting_sample_runs_handler.find_previous_sample_analyses.return_value = \
-            expected_analysis_results
-        self.assertListEqual(
-            expected_analysis_results,
-            self.launcher.locate_preexisting_data_to_include_in_analysis())
+            expected_analysis_results["sample"]
+        self.launcher.preexisting_sample_runs_handler.find_previous_variantcall_analyses.return_value = \
+            expected_analysis_results["genotype"]
+        for level in expected_analysis_results.keys():
+            self.launcher.level = level
+            self.assertListEqual(
+                expected_analysis_results[level],
+                self.launcher.locate_preexisting_data_to_include_in_analysis())
 
     def test_record_job_status_to_databases(self):
         expected_kwargs = {

@@ -132,7 +132,12 @@ class PiperLauncher(object):
 
             # create the piper command
             piper_command = self.create_piper_command(
-                local_project_obj, workflow_subtask, chip_genotypes_for_analysis, setup_xml_path, exit_code_path)
+                local_project_obj,
+                workflow_subtask,
+                chip_genotypes_for_analysis,
+                old_files_for_analysis,
+                setup_xml_path,
+                exit_code_path)
 
             # submit the commands for execution
             submitted_job_id = self.submit_commands(
@@ -188,7 +193,7 @@ class PiperLauncher(object):
         if not self.keep_existing_data:
             if self.level == "sample":
                 clean_fn = self.preexisting_sample_runs_handler.remove_previous_sample_analyses
-            else
+            else:
                 clean_fn = self.preexisting_sample_runs_handler.remove_previous_genotype_analyses
             clean_fn(self.project_obj, self.sample_obj)
 
@@ -252,11 +257,13 @@ class PiperLauncher(object):
             config=self.config,
             exec_mode=self.exec_mode,
             generate_bqsr_bam=self.generate_bqsr_bam,
-            reference_genome=self.reference_genome)
+            reference_genome=self.reference_genome,
+            genotype_files=genotype_files,
+            vcf_files=vcf_files)
 
     def create_setup_command(self, local_project_obj, workflow_subtask):
         if self.level == "genotype":
-            return ""
+            return None, None
         return self.command_handler.build_setup_xml(
             local_project_obj,
             next(local_project_obj),
@@ -329,7 +336,8 @@ Deleting pre-existing analysis files at $(date)"
 rm -rf {files_on_source}
         """.format(**{
             "scratch_analysis_dir": scratch_analysis_dir,
-            "files_on_source": " ".join(old_files_needed_for_analysis)}) if old_files_needed_for_analysis else ""
+            "files_on_source": " ".join(old_files_needed_for_analysis)}) \
+            if self.level != "genotype" and old_files_needed_for_analysis else ""
 
         # calculate checksums of the large files
         checksum_calculation_statements = """
@@ -409,7 +417,7 @@ rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
         return chip_genotype_files if chip_genotype_files else None
 
     def locate_fastq_files_for_project_sample(self, realpath=False, valid_seqruns=None):
-        if self.level = "genotype":
+        if self.level == "genotype":
             return []
         fastq_files = self.filesystem_handler.fastq_files_under_dir(
             self.sample_data_directory, realpath=realpath)
@@ -431,6 +439,9 @@ rsync -rptoDLv {scratch_analysis_dir}{sep} {local_analysis_dir}{sep}
             fastq_files)
 
     def locate_preexisting_data_to_include_in_analysis(self, include_genotype_files=True):
+        if self.level == "genotype":
+            return self.preexisting_sample_runs_handler.find_previous_variantcall_analyses(
+                self.project_obj, self.sample_obj)
         return self.preexisting_sample_runs_handler.find_previous_sample_analyses(
             self.project_obj, self.sample_obj,  include_genotype_files=include_genotype_files)
 

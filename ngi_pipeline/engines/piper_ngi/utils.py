@@ -48,14 +48,14 @@ def _find_existing_analysis_results(project_obj, sample_obj=None, analysis_type=
 
     :param NGIProject project_obj: The NGIProject object with relevant NGISamples
     :param NGISample sample_obj: The relevant NGISample object
-    :param str analysis_type: Indicating the analysis type to search for. Possible values: all, genotype, variantcall
-        default is "all"
+    :param str analysis_type: Indicating the analysis type to search for. Possible values: all, genotype, variantcall,
+        wgs. Default is "all"
     :return: A list of paths to located pre-existing analysis results
     :rtype list:
     :raises TypeError: if an invalid analysis_type is specified
     """
     analysis_type = analysis_type or "all"
-    if analysis_type not in ["all", "genotype", "variantcall"]:
+    if analysis_type not in ["all", "genotype", "variantcall", "wgs"]:
         raise TypeError("{} is not a valid analysis type to locate results for".format(analysis_type))
 
     project_dir_path = os.path.join(project_obj.base_path, "ANALYSIS",
@@ -83,7 +83,8 @@ def _find_existing_analysis_results(project_obj, sample_obj=None, analysis_type=
     # filter the analysis result files based on analysis_type and return the list
     return filter(lambda x: analysis_type == "all" or (
         _piper_output_dir(x).endswith("genotype_concordance") and analysis_type == "genotype") or (
-        not _piper_output_dir(x).endswith("genotype_concordance") and analysis_type == "variantcall"),
+        _piper_output_dir(x).endswith("variant_calls") and analysis_type == "variantcall") or (
+        not _piper_output_dir(x).endswith("genotype_concordance") and analysis_type == "wgs"),
                   analysis_result_files)
 
 
@@ -125,6 +126,14 @@ def find_previous_genotype_analyses(project_obj, sample_obj):
                         ar_file)))) for ar_file in analysis_result_files))
 
 
+def find_previous_variantcall_analyses(project_obj, sample_obj):
+    return filter(lambda x: x.endswith(".vcf.gz") or x.endswith(".vcf"),
+                  _find_existing_analysis_results(
+                      project_obj,
+                      analysis_type="variantcall",
+                      sample_obj=sample_obj))
+
+
 def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype_files=False):
     """Find analysis results for a sample, including .failed and .done files.
     Doesn't throw an error if it can't read a directory.
@@ -137,7 +146,7 @@ def find_previous_sample_analyses(project_obj, sample_obj=None, include_genotype
     """
     return _find_existing_analysis_results(
         project_obj,
-        analysis_type="all" if include_genotype_files else "variantcall",
+        analysis_type="all" if include_genotype_files else "wgs",
         sample_obj=sample_obj)
 
 
@@ -166,7 +175,7 @@ def remove_previous_sample_analyses(project_obj, sample_obj=None):
     :returns: Nothing
     :rtype: None
     """
-    _remove_existing_analysis_results(project_obj, sample_obj=sample_obj, analysis_type="variantcall")
+    _remove_existing_analysis_results(project_obj, sample_obj=sample_obj, analysis_type="wgs")
 
 
 def _get_libpreps_for_sample(project_id, sample_id, status_field):
