@@ -154,6 +154,8 @@ def parse_xl_file(config, xl_file):
     data = data[1:]
     for row in data:
         # row[1] is always sample name. If doesn't match NGI format - skip.
+        if len(row) == 0:
+            continue
         if not re.match(r"^ID\d+-P\d+_\d+", row[1]):
             continue
         # sample has format ID22-P2655_176
