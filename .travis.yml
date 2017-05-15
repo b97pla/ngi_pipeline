@@ -1,0 +1,17 @@
+language: python
+
+python:
+    - "2.7"
+
+before_install:
+    - pip install setuptools --upgrade
+    - pip install -r requirements.txt
+
+install:
+    - pip install .
+
+script:
+    - echo "Dummy call, Travis is done."
+
+notifications:
+    email: false
