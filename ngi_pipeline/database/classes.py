@@ -50,7 +50,7 @@ class CharonSession(requests.Session):
                     headers=self._api_token_dict, timeout=3))
 
         self._project_params = ('projectid', 'name', 'status', 'best_practice_analysis',
-                                'sequencing_facility', 'delivery_status', 'delivery_token')
+                                'sequencing_facility', 'delivery_status', 'delivery_token', 'delivery_projects')
         self._project_reset_params = tuple(set(self._project_params) - \
                                            set(['projectid', 'name',
                                                 'best_practice_analysis',
@@ -58,7 +58,7 @@ class CharonSession(requests.Session):
         self._sample_params = ('sampleid', 'status', 'analysis_status', 'qc_status',
                                'genotype_status', 'genotype_concordance',
                                'total_autosomal_coverage', 'total_sequenced_reads',
-                               'delivery_status', 'duplication_pc', 'type', 'pair')
+                               'delivery_status', 'duplication_pc', 'type', 'pair','delivery_token', 'delivery_projects')
         self._sample_reset_params = tuple(set(self._sample_params) - \
                                           set(['sampleid', 'total_sequenced_reads']))
         self._libprep_params = ('libprepid', 'qc')
@@ -96,7 +96,7 @@ class CharonSession(requests.Session):
         return self.get(self.construct_charon_url('samples', projectid)).json()
 
     def project_update(self, projectid, name=None, status=None, best_practice_analysis=None,
-                       sequencing_facility=None, delivery_status=None, delivery_token=None):
+                       sequencing_facility=None, delivery_status=None, delivery_token=None, delivery_projects=None):
         l_dict = locals()
         data = { k: l_dict.get(k) for k in self._project_params if l_dict.get(k)}
         return self.put(self.construct_charon_url('project', projectid),
@@ -136,7 +136,7 @@ class CharonSession(requests.Session):
     def sample_update(self, projectid, sampleid, status=None, analysis_status=None,
                       qc_status=None, genotype_status=None,
                       genotype_concordance=None, total_autosomal_coverage=None,
-                      total_sequenced_reads=None, delivery_status=None, duplication_pc=None):
+                      total_sequenced_reads=None, delivery_status=None, duplication_pc=None, delivery_token=None, delivery_projects=None ):
         url = self.construct_charon_url("sample", projectid, sampleid)
         l_dict = locals()
         data = { k: l_dict.get(k) for k in self._sample_params if l_dict.get(k)}

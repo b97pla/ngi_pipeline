@@ -445,7 +445,7 @@ def record_process_sample(project, sample, workflow_subtask, analysis_module_nam
             sample_status_field = "analysis_status"
             sample_status_value = "UNDER_ANALYSIS"
             sample_data_status_field = "status"
-            sample_data_status_value = "STALE"
+            sample_data_status_value = '' #in his way it will not be updated
             seqrun_status_field = "alignment_status"
             seqrun_status_value = "RUNNING"
             extra_args = {"mean_autosomal_coverage": 0}
