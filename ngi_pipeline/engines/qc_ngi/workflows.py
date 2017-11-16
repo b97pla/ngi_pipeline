@@ -202,9 +202,6 @@ def fastq_to_be_analysed(fastq_files, analysis_dir, output_footers):
         if not m:
             # fastq file name doesn't match expected pattern -- let be serious.. we do NOT process it
             continue
-        if '_I1_' in fastq_file:
-            #Don't want to include index files in the QC. 10X specific 
-            continue 
         linked_fastq_file_base = '{}_{}'.format(m.groups()[0], fc_id)
         linked_fastq_file_name = '{}_{}.{}'.format( m.groups()[0], fc_id, m.groups()[1])
         linked_fastq_file_path = os.path.join(analysis_dir, linked_fastq_file_name)
