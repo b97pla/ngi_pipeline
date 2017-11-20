@@ -197,6 +197,7 @@ def find_fastq_read_pairs(file_list):
     suffix_pattern = re.compile(r'(.*)fastq')
     # Cut off at the read group
     file_format_pattern = re.compile(r'(.*)_(?:R\d|\d\.).*')
+    index_format_pattern= re.compile(r'(.*)_(?:I\d|\d\.).*')
     matches_dict = collections.defaultdict(list)
     for file_pathname in file_list:
         file_basename = os.path.basename(file_pathname)
@@ -206,13 +207,18 @@ def find_fastq_read_pairs(file_list):
             pair_base = file_format_pattern.match(file_basename).groups()[0]
             matches_dict["{}_{}".format(pair_base,fc_id)].append(file_pathname)
         except AttributeError:
-            LOG.warn("Warning: file doesn't match expected file format, "
+    
+            #look for index file - 10Xgenomics case
+            index_file = index_format_pattern.match(file_basename).groups()[0]
+            if index_file:
+                matches_dict["{}_{}".format(index_file,fc_id)].append(file_pathname)
+            else:
+                LOG.warn("Warning: file doesn't match expected file format, "
                       "cannot be paired: \"{}\"".format(file_pathname))
-            # File could not be paired, set by itself (?)
-            file_basename_stripsuffix = suffix_pattern.split(file_basename)[0]
-            matches_dict[file_basename_stripsuffix].append(os.abspath(file_pathname))
+                # File could not be paired, set by itself (?)
+                file_basename_stripsuffix = suffix_pattern.split(file_basename)[0]
+                matches_dict[file_basename_stripsuffix].append(os.abspath(file_pathname))
     return dict(matches_dict)
-
 
 def parse_lane_from_filename(sample_basename):
     """Lane number is parsed from the standard filename format,
