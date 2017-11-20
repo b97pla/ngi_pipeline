@@ -211,7 +211,7 @@ def find_fastq_read_pairs(file_list):
             #look for index file - 10Xgenomics case
             index_file = index_format_pattern.match(file_basename).groups()[0]
             if index_file:
-                matches_dict["{}_{}".format(pair_base,fc_id)].append(file_pathname)
+                matches_dict["{}_{}".format(index_file,fc_id)].append(file_pathname)
             else:
                 LOG.warn("Warning: file doesn't match expected file format, "
                       "cannot be paired: \"{}\"".format(file_pathname))
