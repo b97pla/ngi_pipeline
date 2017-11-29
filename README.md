@@ -1,5 +1,7 @@
 ![NGI Pipeline mascot, Mr. Splash](artwork/gh-splash.png)
 
+[![Build Status](https://travis-ci.org/b97pla/ngi_pipeline.svg?branch=feature%2Ftest_with_travis)](https://travis-ci.org/b97pla/ngi_pipeline)
+
 Software designed to take demultiplexed Illumina flowcells and shove 'em through an analysis pipeline (e.g. Piper/GATK).
 
 Nota bene
