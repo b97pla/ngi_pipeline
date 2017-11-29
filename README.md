@@ -1,6 +1,8 @@
 ![NGI Pipeline mascot, Mr. Splash](artwork/gh-splash.png)
 
-[![Build Status](https://travis-ci.org/b97pla/ngi_pipeline.svg?branch=feature%2Ftest_with_travis)](https://travis-ci.org/b97pla/ngi_pipeline)
+[![Build Status](https://travis-ci.org/NationalGenomicsInfrastructure/ngi_pipeline.svg?branch=master)](https://travis-ci.org/NationalGenomicsInfrastructure/ngi_pipeline)
+[![Maintainability](https://api.codeclimate.com/v1/badges/6988dea77881c498ad78/maintainability)](https://codeclimate.com/github/NationalGenomicsInfrastructure/ngi_pipeline/maintainability)
+[![codecov](https://codecov.io/gh/NationalGenomicsInfrastructure/ngi_pipeline/branch/master/graph/badge.svg)](https://codecov.io/gh/NationalGenomicsInfrastructure/ngi_pipeline)
 
 Software designed to take demultiplexed Illumina flowcells and shove 'em through an analysis pipeline (e.g. Piper/GATK).
 
