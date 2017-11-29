@@ -63,7 +63,7 @@ logging:
     # the log file itself is compulsory to be defined, or you will get a nasty exception
     # to make sure you are defining it, and not overwriting the production one below, it is left commented out
     # default location is /proj/a2014205/ngi_resources/ngi_pipeline.log
-    #log_file: /base/to/proj/ngi_pipeline.log
+    log_file: ngi_pipeline.test.log
 
 paths: # Hard code paths here if you are that kind of a person
     binaries:
