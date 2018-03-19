@@ -122,6 +122,8 @@ class TestSarekAnalysis(unittest.TestCase):
 
 @mock.patch("ngi_pipeline.engines.sarek.models.ReferenceGenome", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.database.CharonConnector", autospec=True)
+@mock.patch("ngi_pipeline.engines.sarek.database.TrackingConnector", autospec=True)
+@mock.patch("ngi_pipeline.engines.sarek.process.ProcessConnector", autospec=True)
 class TestSarekGermlineAnalysis(unittest.TestCase):
 
     CONFIG = {
@@ -137,17 +139,22 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
         self.config = TestSarekGermlineAnalysis.CONFIG
 
-    def get_instance(self, charon_connector_mock, reference_genome_mock):
+    def get_instance(
+            self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         reference_genome = reference_genome_mock.return_value
         reference_genome.__str__.return_value = self.config["genome"]
         return SarekGermlineAnalysis(
             reference_genome,
             {"sarek": self.config},
             self.log,
-            charon_connector=charon_connector_mock)
+            charon_connector=charon_connector_mock,
+            tracking_connector=tracking_connector_mock,
+            process_connector=process_connector_mock)
 
-    def test_command_line(self, charon_connector_mock, reference_genome_mock):
-        sarek_analysis = self.get_instance(charon_connector_mock, reference_genome_mock)
+    def test_command_line(
+            self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
+        sarek_analysis = self.get_instance(
+            process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
         observed_cmd = sarek_analysis.command_line(self.config["sampleDir"], self.config["outDir"])
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
@@ -155,17 +162,13 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
         for key in filter(lambda k: k not in ["profile", "nf_path", "sarek_path"], self.config.keys()):
             self.assertIn("--{}={}".format(key, self.config[key]), observed_cmd)
 
-    def test_analyze_sample(self, charon_connector_mock, reference_genome_mock):
-        with mock.patch("ngi_pipeline.engines.sarek.models.execute_command_line") as execute_mock, \
-                mock.patch("ngi_pipeline.engines.sarek.models.safe_makedir") as makedir_mock:
-            analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
-            sarek_analysis = self.get_instance(charon_connector_mock, reference_genome_mock)
-            for sample_obj in analysis_obj.project:
-                sarek_analysis.analyze_sample(sample_obj, analysis_obj)
-                makedir_mock.assert_called_once()
-                execute_mock.assert_called_once()
-                makedir_mock.reset_mock()
-                execute_mock.reset_mock()
+    def test_analyze_sample(
+            self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
+        analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
+        sarek_analysis = self.get_instance(
+            process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
+        for sample_obj in analysis_obj.project:
+            sarek_analysis.analyze_sample(sample_obj, analysis_obj)
 
 
 class TestReferenceGenome(unittest.TestCase):

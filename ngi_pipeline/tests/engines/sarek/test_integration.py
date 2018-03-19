@@ -46,7 +46,10 @@ class TestIntegration(unittest.TestCase):
 
     @mock.patch("ngi_pipeline.conductor.launchers.CharonSession", autospec=True)
     @mock.patch("ngi_pipeline.conductor.classes.CharonSession", autospec=True)
-    def test_launch_analysis(self, charon_session_classes_mock, charon_session_launchers_mock):
+    @mock.patch(
+        "ngi_pipeline.engines.sarek."
+        "local_process_tracking.update_charon_with_local_jobs_status", autospec=True)
+    def test_launch_analysis(self, process_tracking_mock, charon_session_classes_mock, charon_session_launchers_mock):
         charon_classes_mock = charon_session_classes_mock.return_value
         charon_classes_mock.project_get.return_value = {
             "best_practice_analysis": self.config["analysis"]["best_practice_analysis"].keys()[0]}
@@ -58,6 +61,7 @@ class TestIntegration(unittest.TestCase):
         with mock.patch("ngi_pipeline.engines.sarek.analyze") as analyze_mock:
             project_obj = self.projects[0]
             launch_analysis([project_obj], config=self.config, no_qc=True)
+            process_tracking_mock.assert_called_once()
             analyze_mock.assert_called_once()
             called_args = analyze_mock.call_args[0]
             self.assertEqual(project_obj, called_args[0].project)

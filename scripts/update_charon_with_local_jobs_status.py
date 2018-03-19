@@ -10,9 +10,9 @@ if __name__=="__main__":
 
     # E.g. piper
     engine = parser.parse_args().engine.lower()
-    if not engine.endswith("_ngi"):
+    #if not engine.endswith("_ngi"):
         # half-hearted attempt to make this more flexible
-        engine = "{}_ngi".format(engine)
+    #    engine = "{}_ngi".format(engine)
 
     module = "ngi_pipeline.engines.{}".format(engine)
     ## This should at some point be refactored. Sigh.

@@ -1,8 +1,8 @@
 import os
 
-from ngi_pipeline.engines.sarek.database import CharonConnector
+from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized
-from ngi_pipeline.utils.filesystem import execute_command_line, safe_makedir
+from ngi_pipeline.engines.sarek.process import ProcessConnector
 
 
 class SarekAnalysis(object):
@@ -17,15 +17,24 @@ class SarekAnalysis(object):
         "nf_path": "/lupus/ngi/staging/latest/sw/nextflow/nextflow"
     }
 
-    def __init__(self, reference_genome, config, log, charon_connector=None, **kwargs):
+    def __init__(
+            self,
+            reference_genome,
+            config,
+            log,
+            charon_connector=None,
+            tracking_connector=None,
+            process_connector=None):
         self.reference_genome = reference_genome
         self.config = config
         self.log = log
         self.profile, self.tools, self.nf_path, self.sarek_path = self.configure_analysis()
         self.charon_connector = charon_connector or CharonConnector(self.config, self.log)
+        self.tracking_connector = tracking_connector or TrackingConnector(self.config, self.log)
+        self.process_connector = process_connector or ProcessConnector(cwd=os.curdir)
 
     def __repr__(self):
-        return "{}-{}".format(type(self).__name__, str(self.reference_genome))
+        return type(self).__name__
 
     def configure_analysis(self, config=None):
         config = config or self.config
@@ -37,7 +46,21 @@ class SarekAnalysis(object):
         return profile, tools, nf_path, sarek_path
 
     @staticmethod
-    def get_analysis_instance_for_project(projectid, config, log, charon_connector=None):
+    def get_analysis_type_for_workflow(workflow):
+        if workflow == "SarekAnalysis":
+            return SarekAnalysis
+        if workflow == "SarekGermlineAnalysis":
+            return SarekGermlineAnalysis
+        return None
+
+    @staticmethod
+    def get_analysis_instance_for_project(
+            projectid,
+            config,
+            log,
+            charon_connector=None,
+            tracking_connector=None,
+            process_connector=None):
         """
         Factory method returning a SarekAnalysis subclass corresponding to the best practice analysis specified for
         the supplied project.
@@ -50,15 +73,22 @@ class SarekAnalysis(object):
         :return: an instance of a SarekAnalysis subclass
         """
 
-        if not charon_connector:
-            charon_connector = CharonConnector(config, log)
+        charon_connector = charon_connector or CharonConnector(config, log)
+        tracking_connector = tracking_connector or TrackingConnector(config, log)
+        process_connector = process_connector or ProcessConnector(cwd=os.curdir)
 
         best_practice_analysis = charon_connector.best_practice_analysis(projectid)
 
         reference_genome = ReferenceGenome.get_instance(best_practice_analysis.split("_")[2])
         sarek_analysis_type = best_practice_analysis.split("_")[1].lower()
         if sarek_analysis_type == "germline":
-            return SarekGermlineAnalysis(reference_genome, config, log, charon_connector=charon_connector)
+            return SarekGermlineAnalysis(
+                reference_genome,
+                config,
+                log,
+                charon_connector,
+                tracking_connector,
+                process_connector)
         elif sarek_analysis_type == "somatic":
             raise NotImplementedError(
                 "best-practice.analysis for {} is not implemented".format(best_practice_analysis))
@@ -80,24 +110,50 @@ class SarekAnalysis(object):
         return True
 
     def analyze_sample(self, sample_object, analysis_object):
-        sample_input_dir = os.path.join(
+        args_to_collect_paths = [
             analysis_object.project.base_path,
-            "DATA",
             analysis_object.project.dirname,
-            sample_object.dirname)
-        sample_output_dir = os.path.join(
-            analysis_object.project.base_path,
-            "ANALYSIS",
-            analysis_object.project.dirname,
-            sample_object.dirname,
-            str(self))
+            sample_object.dirname]
+        sample_input_dir = self.sample_data_path(*args_to_collect_paths)
+        sample_output_dir = self.sample_analysis_path(*args_to_collect_paths)
+        sample_exit_code_path = self.sample_analysis_exit_code_path(*args_to_collect_paths)
+
         cmd = self.command_line(sample_input_dir, sample_output_dir)
-        safe_makedir(sample_output_dir)
-        proc = execute_command_line(cmd, shell=False, cwd=sample_output_dir)
-        self.log.info("launched '{}', pid: {}".format(cmd, proc.pid))
+        pid = self.process_connector.execute_process(
+            cmd,
+            working_dir=sample_output_dir,
+            exit_code_path=sample_exit_code_path,
+            job_name="{}-{}-{}".format(
+                analysis_object.project.name,
+                sample_object.name,
+                str(self)))
+        self.log.info("launched '{}', with {}, pid: {}".format(cmd, type(self.process_connector), pid))
+        self.tracking_connector.record_process_sample(
+            analysis_object.project.name,
+            sample_object.name,
+            analysis_object.project.base_path,
+            str(self),
+            "sarek",
+            pid,
+            TrackingConnector.pidfield_from_process_connector_type(
+                type(self.process_connector)))
 
     def command_line(self, sample_input_dir, sample_output_dir):
         raise NotImplementedError("command_line should be implemented in the subclasses")
+
+    @classmethod
+    def sample_data_path(cls, base_path, projectid, sampleid):
+        return os.path.join(base_path, "DATA", projectid, sampleid)
+
+    @classmethod
+    def sample_analysis_path(cls, base_path, projectid, sampleid):
+        return os.path.join(base_path, "ANALYSIS", projectid, sampleid, cls.__name__)
+
+    @classmethod
+    def sample_analysis_exit_code_path(cls, base_path, projectid, sampleid):
+        return os.path.join(
+            cls.sample_analysis_path(base_path, projectid, sampleid),
+            "{}-{}-{}.exit_code".format(projectid, sampleid, cls.__name__))
 
 
 class SarekGermlineAnalysis(SarekAnalysis):
@@ -113,6 +169,7 @@ class SarekGermlineAnalysis(SarekAnalysis):
             "--sampleDir={sample_dir} " \
             "--outDir={output_dir} " \
             "-profile {profile}"
+        return "sleep 60"
         return cmd_template.format(
             nf_path = self.nf_path,
             sarek_path=self.sarek_path,
