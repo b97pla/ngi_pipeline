@@ -1,9 +1,12 @@
 import mock
+import os
 import unittest
 
+from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.engines.sarek import local_process_tracking
 from ngi_pipeline.engines.sarek.database import TrackingConnector
 from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessStopped
+from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
 
 @mock.patch("ngi_pipeline.engines.sarek.database.TrackingConnector", autospec=True)
@@ -28,6 +31,7 @@ class TestLocalProcessTracking(unittest.TestCase):
         analysis.project_id = "this-is-a-project-id"
         analysis.sample_id = "this-is-a-sample-id"
         analysis.project_base_path = "this-is-a-project-base-path"
+        analysis.workflow = "SarekGermlineAnalysis"
         expected_exit_code_path = "this-is-a-path"
         exit_code_mock.return_value = expected_exit_code_path
         expected_status = ProcessRunning
@@ -66,10 +70,14 @@ class TestLocalProcessTracking(unittest.TestCase):
                 workflow="this-is-the-workflow",
                 slurm_job_id=98765)
         )
+        project_obj = NGIProject(None, None, None, None)
+        project_obj.add_sample("this-is-a-sample-id", "this-is-a-sample-id")
         tracking_connector = tracking_connector_mock.return_value
         tracking_connector.tracked_analyses.return_value = expected_analyses
         with mock.patch.object(local_process_tracking, 'get_analysis_status') as analysis_status_mock, \
-                mock.patch.object(local_process_tracking, 'remove_analysis') as remove_mock:
+                mock.patch.object(local_process_tracking, 'remove_analysis') as remove_mock, \
+                mock.patch.object(local_process_tracking, 'project_from_analysis') as project_mock:
+            project_mock.return_value = project_obj
             local_process_tracking.update_charon_with_local_jobs_status(
                 config={"this-is-not-an-empty-config": "nope"},
                 log=None,
@@ -78,3 +86,22 @@ class TestLocalProcessTracking(unittest.TestCase):
             analysis_status_mock.assert_called()
             remove_mock.assert_called()
 
+    def test__project_from_fastq_file_paths(self, *mocks):
+        expected_project_obj = TestLaunchers.get_NGIProject("1")
+        fastq_files = []
+        for sample_obj in expected_project_obj:
+            for libprep_obj in sample_obj:
+                for seqrun_obj in libprep_obj:
+                    fastq_files.extend(
+                        map(
+                            lambda f: os.path.join(
+                                expected_project_obj.base_path,
+                                "DATA",
+                                expected_project_obj.dirname,
+                                sample_obj.dirname,
+                                libprep_obj.dirname,
+                                seqrun_obj.dirname,
+                                f),
+                            seqrun_obj.fastq_files))
+        observed_project_obj = local_process_tracking._project_from_fastq_file_paths(fastq_files)
+        self.assertEqual(expected_project_obj, observed_project_obj)

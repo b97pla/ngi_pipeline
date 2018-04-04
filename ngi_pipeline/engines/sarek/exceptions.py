@@ -42,6 +42,17 @@ class SampleAnalysisStatusNotFoundError(Exception):
         self.reason = reason
 
 
+class SampleNotValidForAnalysisError(Exception):
+
+    def __init__(self, projectid, sampleid, reason=None):
+        super(SampleNotValidForAnalysisError, self).__init__(
+            "requirements for starting analysis not fulfilled for sample '{}' in project '{}'{}".format(
+                sampleid, projectid, ": {}".format(reason.__repr__()) if reason else ""))
+        self.projectid = projectid
+        self.sampleid = sampleid
+        self.reason = reason
+
+
 class SampleLookupError(Exception):
 
     def __init__(self, projectid, sampleid, reason=None):

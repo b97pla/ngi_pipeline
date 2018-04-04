@@ -2,7 +2,7 @@ import mock
 import os
 import unittest
 
-from ngi_pipeline.conductor.classes import NGIAnalysis, NGIProject, NGISample, NGILibraryPrep, NGISeqRun
+from ngi_pipeline.conductor.classes import NGIAnalysis, NGIProject
 from ngi_pipeline.log.loggers import minimal_logger
 
 
@@ -19,34 +19,32 @@ class TestLaunchers(unittest.TestCase):
     }
 
     @staticmethod
-    def get_NGIObject(cls, n):
-        name = "{}_{}".format(cls.__name__, n)
-        return cls(name, "{}".format(name))
+    def add_seqruns(libprep):
+        for name in map(str, range(1, 3)):
+            seqrun_name = "180411_ST-0123_001{}_AABC00{}CXY".format(name, name)
+            seqrun = libprep.add_seqrun(seqrun_name, seqrun_name)
+            seqrun.add_fastq_files(["{}_S{}_L001_R{}_001.fastq.gz".format(libprep.name, name, i) for i in range(1, 3)])
 
     @staticmethod
-    def get_NGISeqRun(n):
-        srun = TestLaunchers.get_NGIObject(NGISeqRun, "{}_{}_{}".format(n, n, n))
-        srun.add_fastq_files(["{}_L001_R{}_001.fastq.gz".format(srun.name, i) for i in range(1, 3)])
-        return srun
+    def add_libpreps(sample):
+        for name in map(str, range(1, 3)):
+            libprep_name = "{}-libprep{}".format(sample.name, name)
+            libprep = sample.add_libprep(libprep_name, libprep_name)
+            TestLaunchers.add_seqruns(libprep)
 
     @staticmethod
-    def get_NGILibraryPrep(n):
-        lprep = TestLaunchers.get_NGIObject(NGILibraryPrep, n)
-        lprep._subitems = {srun.name: srun for srun in map(TestLaunchers.get_NGISeqRun, range(1, 3))}
-        return lprep
-
-    @staticmethod
-    def get_NGISample(n):
-        sample = TestLaunchers.get_NGIObject(NGISample, n)
-        sample._subitems = {lprep.name: lprep for lprep in map(TestLaunchers.get_NGILibraryPrep, range(1, 3))}
-        return sample
+    def add_samples(project):
+        for name in map(str, range(1, 3)):
+            sample_name = "{}-sample{}".format(project.name, name)
+            sample = project.add_sample(sample_name, sample_name)
+            TestLaunchers.add_libpreps(sample)
 
     @staticmethod
     def get_NGIProject(n):
         name = "{}_{}".format(NGIProject.__name__, n)
         project = NGIProject(
             name, "{}".format(name), "{}".format(name), os.path.join("/path", "to", name, "base"))
-        project._subitems = {sample.name: sample for sample in map(TestLaunchers.get_NGISample, range(1, 3))}
+        TestLaunchers.add_samples(project)
         return project
 
     @staticmethod

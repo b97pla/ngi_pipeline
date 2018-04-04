@@ -1,4 +1,5 @@
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
+from ngi_pipeline.engines.sarek.exceptions import SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.models import SarekAnalysis
 from ngi_pipeline.engines.sarek.process import SlurmConnector
 
@@ -35,15 +36,9 @@ def analyze(analysis_object):
         tracking_connector=tracking_connector,
         process_connector=slurm_conector)
 
-    # filter out samples that do not fulfil the conditions to be launched
-    samples_to_launch = filter(
-        lambda sample: analysis_engine.sample_should_be_started(
-            analysis_object.project.project_id,
-            sample.name,
-            restart_failed_jobs=analysis_object.restart_failed_jobs,
-            restart_finished_jobs=analysis_object.restart_finished_jobs,
-            restart_running_jobs=analysis_object.restart_running_jobs),
-        analysis_object.project)
-
-    # launch analysis for each sample
-    map(lambda sample: analysis_engine.analyze_sample(sample, analysis_object), samples_to_launch)
+    # iterate over the samples and launch analysis for each
+    for sample_object in analysis_object.project:
+        try:
+            analysis_engine.analyze_sample(sample_object, analysis_object)
+        except SampleNotValidForAnalysisError as e:
+            analysis_object.log.error(e)

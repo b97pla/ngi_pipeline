@@ -46,6 +46,29 @@ class CharonConnector:
             self.log.error(analysis_status_exception)
             raise analysis_status_exception
 
+    def libprep_qc_status(self, projectid, sampleid, libprepid):
+        try:
+            return self.charon_session.libprep_get(projectid, sampleid, libprepid)["qc"]
+        except (KeyError, CharonError) as e:
+            sample_exception = SampleLookupError(
+                projectid,
+                sampleid,
+                reason="qc status for libprep '{}' could not be fetched: {}".format(libprepid, e))
+            self.log.error(sample_exception)
+            raise sample_exception
+
+    def seqrun_alignment_status(self, projectid, sampleid, libprepid, seqrunid):
+        try:
+            return self.charon_session.seqrun_get(projectid, sampleid, libprepid, seqrunid)["alignment_status"]
+        except (KeyError, CharonError) as e:
+            sample_exception = SampleLookupError(
+                projectid,
+                sampleid,
+                reason="alignment status for libprep '{}' and seqrun '{}' could not be fetched: {}".format(
+                    libprepid, seqrunid, e))
+            self.log.error(sample_exception)
+            raise sample_exception
+
     def set_sample_analysis_status(
             self, projectid, sampleid, status, recurse=False, restrict_to_libpreps=None, restrict_to_seqruns=None):
         try:
