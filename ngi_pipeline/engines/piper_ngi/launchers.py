@@ -40,7 +40,7 @@ from ngi_pipeline.utils.filesystem import load_modules, execute_command_line, \
                                           rotate_file, safe_makedir, \
                                           match_files_under_dir
 from ngi_pipeline.utils.classes import with_ngi_config
-from ngi_pipeline.utils.filesystem import fastq_files_under_dir
+from ngi_pipeline.utils.filesystem import fastq_files_under_dir, is_index_file
 from ngi_pipeline.utils.parsers import parse_lane_from_filename, \
                                        find_fastq_read_pairs_from_dir, \
                                        get_flowcell_id_from_dirtree
@@ -256,7 +256,8 @@ def collect_files_for_sample_analysis(project_obj, sample_obj,
     proj_obj = NGIProject(project_obj.name, project_obj.dirname,
                           project_obj.project_id, project_obj.base_path)
     sample_obj = proj_obj.add_sample(sample_obj.name, sample_obj.dirname)
-    for fastq_path in fastq_files_on_filesystem:
+    # filter out index files from the analysis
+    for fastq_path in filter(lambda f: not is_index_file(f), fastq_files_on_filesystem):
         base_path, fastq = os.path.split(fastq_path)
         if not fastq:
             base_path, fastq = os.path.split(base_path) # Handles trailing slash
