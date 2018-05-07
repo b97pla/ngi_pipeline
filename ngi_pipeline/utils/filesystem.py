@@ -366,6 +366,18 @@ def recreate_project_from_filesystem(project_dir,
     return project_obj
 
 
+def is_index_file(fastq_file, index_file_pattern=r'_L00\d_I\d_'):
+    """
+    Returns True if the fastq file appears to be an index file, based on the file name pattern
+
+    :param fastq_file: the file name of the fastq file
+    :param index_file_pattern: a regexp pattern that discriminates index files from non-index files.
+    Will use '_L00\d_I\d_' if not specified
+    :return: True if file name matches the index file pattern, False otherwise
+    """
+    return re.search(index_file_pattern, os.path.basename(fastq_file)) is not None
+
+
 def fastq_files_under_dir(dirname, realpath=True):
     return match_files_under_dir(dirname,
                                  pattern=".*\.(fastq|fq)(\.gz|\.gzip|\.bz2)?$",

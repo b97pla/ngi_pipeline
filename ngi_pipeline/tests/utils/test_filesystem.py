@@ -9,11 +9,12 @@ import filecmp
 
 from ngi_pipeline.utils.filesystem import chdir, curdir_tmpdir, do_rsync, execute_command_line, \
                                           load_modules, safe_makedir, do_hardlink, do_symlink, \
-                                          locate_flowcell, locate_project
+                                          locate_flowcell, locate_project, is_index_file
 
 class TestFilesystemUtils(unittest.TestCase):
+
     def setUp(self):
-        self.tmp_dir = tempfile.mkdtemp()
+        self.tmp_dir = os.path.realpath(tempfile.mkdtemp())
 
 
     def test_locate_flowcell(self):
@@ -120,8 +121,16 @@ class TestFilesystemUtils(unittest.TestCase):
         assert(not os.path.exists(new_tmp_dir)), "Directory is not properly removed after creation"
 
     def test_chdir(self):
-        original_dir = os.getcwd()
-        new_directory = os.path.join(original_dir, self.tmp_dir)
+        original_dir = os.path.realpath(os.getcwd())
         with chdir(self.tmp_dir):
-            assert(os.getcwd() == new_directory), "New directory does not match intended one"
-        assert(os.getcwd() == original_dir), "Original directory is not returned to after context manager is closed"
+            self.assertEqual(self.tmp_dir, os.path.realpath(os.getcwd()), "New directory does not match intended one")
+        self.assertEqual(original_dir, os.path.realpath(os.getcwd()), "Original directory is not returned to after context manager is closed")
+
+    def test_is_index_file(self):
+        self.assertTrue(is_index_file("jkhdsfajhkdsjk_L002_I2_"))
+        self.assertTrue(is_index_file("jkhdsfajhkdsjk_L009_I9_jkhdhjgsdh"))
+        self.assertFalse(is_index_file("jkhdsfajhkdsjk_L002_R2_"))
+        self.assertFalse(is_index_file("jkhdsfajhkdsjk_L0021_I2_"))
+        self.assertFalse(is_index_file("jkhdsfajhkdsjk_L002_I22_"))
+        self.assertTrue(is_index_file("jkhdsfajhkdsjk_L002_I22_", index_file_pattern=r'_I\d\d_'))
+        self.assertFalse(is_index_file("jkhdsfajhkdsjk"))
