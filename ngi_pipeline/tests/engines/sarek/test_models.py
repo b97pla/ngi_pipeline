@@ -108,20 +108,20 @@ class TestSarekAnalysis(unittest.TestCase):
             self.log,
             charon_connector=charon_connector_mock.return_value)
 
-        self.assertEqual(config["profile"], sarek_analysis.profile)
-        self.assertEqual(config["tools"], sarek_analysis.tools)
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["nf_path"], sarek_analysis.nf_path)
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["sarek_path"], sarek_analysis.sarek_path)
+        for key in config.keys():
+            self.assertEqual(config[key], sarek_analysis.sarek_config[key])
+        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["nf_path"], sarek_analysis.sarek_config["nf_path"])
+        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["sarek_path"], sarek_analysis.sarek_config["sarek_path"])
 
         config = {
+            "config": "this-is-a-site-specific-config-file",
             "profile": "this-is-another-profile",
             "nf_path": "this-is-the-path-to-nextflow",
             "sarek_path": "this-is-the-path-to-sarek"}
-        profile, tools, nf_path, sarek_path = sarek_analysis.configure_analysis(config={"sarek": config})
-        self.assertEqual(config["profile"], profile)
-        self.assertEqual(config["nf_path"], nf_path)
-        self.assertEqual(config["sarek_path"], sarek_path)
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["tools"], tools)
+        sarek_config = sarek_analysis.configure_analysis(config={"sarek": config})
+        for key in config.keys():
+            self.assertEqual(config[key], sarek_config[key])
+        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["tools"], sarek_config["tools"])
 
     def test_command_line(self, charon_connector_mock, reference_genome_mock):
 
@@ -176,8 +176,6 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
         "tools": ["tool-A", "tool-B"],
         "nf_path": "this-is-the-nextflow-path",
         "sarek_path": "this-is-the-sarek-path",
-        "sample": "this-is-the-sample-tsv",
-        "outdir": "this-is-the-output-dir",
         "genome": "this-is-the-genome"}
 
     def setUp(self):
@@ -200,7 +198,9 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
-        observed_cmd = sarek_analysis.command_line(self.config["sample"], self.config["outdir"])
+        self.config["sample"] = "/path/to/sample-tsv-definition-file"
+        self.config["outDir"] = "/path/to/analysis/output"
+        observed_cmd = sarek_analysis.command_line(self.config["sample"], self.config["outDir"])
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
         self.assertIn("--tools {}".format(",".join(self.config["tools"])), observed_cmd)
@@ -329,8 +329,7 @@ class TestSarekWorkflowStep(unittest.TestCase):
 
         # test a non-existing attribute
         attribute = "this-attribute-does-not-exist"
-        with self.assertRaises(AttributeError):
-            self.sarek_workflow_step._append_argument(base_string, attribute)
+        self.assertEqual(base_string, self.sarek_workflow_step._append_argument(base_string, attribute))
 
         # test a None attribute
         attribute = "none_attribute"
@@ -340,14 +339,14 @@ class TestSarekWorkflowStep(unittest.TestCase):
         # test a list attribute
         attribute = "list_attribute"
         value = ["this", "is", "a", "list"]
-        setattr(self.sarek_workflow_step, attribute, value)
+        self.sarek_workflow_step.sarek_args[attribute] = value
         expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
         self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
 
         # test a string attribute
         attribute = "string_attribute"
         value = "this-is-a-string"
-        setattr(self.sarek_workflow_step, attribute, value)
+        self.sarek_workflow_step.sarek_args[attribute] = value
         expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
         self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
 

@@ -19,8 +19,10 @@ class SarekAnalysis(object):
     DEFAULT_CONFIG = {
         "profile": "standard",
         "tools": None,
+        "site_config": None,
         "sarek_path": "/lupus/ngi/staging/latest/sw/sarek/",
-        "nf_path": "/lupus/ngi/staging/latest/sw/nextflow/nextflow"
+        "nf_path": "/lupus/ngi/staging/latest/sw/nextflow/nextflow",
+        "containerPath": os.path.join("/lupus/ngi/staging/latest/sw/sarek/", "containers")
     }
 
     def __init__(
@@ -34,7 +36,7 @@ class SarekAnalysis(object):
         self.reference_genome = reference_genome
         self.config = config
         self.log = log
-        self.profile, self.tools, self.nf_path, self.sarek_path = self.configure_analysis()
+        self.sarek_config = self.configure_analysis(genome=self.reference_genome)
         self.charon_connector = charon_connector or CharonConnector(self.config, self.log)
         self.tracking_connector = tracking_connector or TrackingConnector(self.config, self.log)
         self.process_connector = process_connector or ProcessConnector(cwd=os.curdir)
@@ -42,15 +44,12 @@ class SarekAnalysis(object):
     def __repr__(self):
         return type(self).__name__
 
-    def configure_analysis(self, config=None):
+    def configure_analysis(self, config=None, **opts):
         config = config or self.config
         sarek_config = self.DEFAULT_CONFIG.copy()
+        sarek_config.update(opts)
         sarek_config.update(config.get("sarek", {}))
-        profile = sarek_config.get("profile")
-        tools = sarek_config.get("tools")
-        nf_path = sarek_config.get("nf_path")
-        sarek_path = sarek_config.get("sarek_path")
-        return profile, tools, nf_path, sarek_path
+        return sarek_config
 
     @staticmethod
     def get_analysis_type_for_workflow(workflow):
@@ -265,19 +264,12 @@ class SarekGermlineAnalysis(SarekAnalysis):
 
     def command_line(self, sample_tsv_file, sample_output_dir):
         step_args = [
-            self.nf_path,
-            self.sarek_path]
-        step_kwargs = {
-            "profile": self.profile,
-            "sample": sample_tsv_file,
-            "outdir": sample_output_dir,
-            "genome": self.reference_genome,
-            "tools": self.tools
-        }
+            self.sarek_config.get("nf_path", "nextflow"),
+            self.sarek_config.get("sarek_path", "sarek")]
         processing_steps = [
-            SarekPreprocessingStep(*step_args, **step_kwargs),
-            SarekGermlineVCStep(*step_args, **step_kwargs),
-            SarekMultiQCStep(*step_args, **step_kwargs)
+            SarekPreprocessingStep(*step_args, sample=sample_tsv_file, outDir=sample_output_dir, **self.sarek_config),
+            SarekGermlineVCStep(*step_args, sample=sample_tsv_file, outDir=sample_output_dir, **self.sarek_config),
+            SarekMultiQCStep(*step_args, sample=sample_tsv_file, outDir=sample_output_dir, **self.sarek_config)
         ]
         return " && ".join(
             map(lambda step: step.command_line(), processing_steps))
@@ -410,34 +402,32 @@ class GRCh38(ReferenceGenome):
 
 class SarekWorkflowStep(object):
 
-    def __init__(self, nf_path, sarek_path, profile=None, sample=None, step=None, tools=None, genome=None, outdir=None):
-        self.nf_path = nf_path
-        self.sarek_path = sarek_path
-        self.profile = profile
-        self.sample = sample
-        self.step = step
-        self.tools = tools
-        self.genome = genome
-        self.outDir = outdir
+    def __init__(
+            self,
+            path_to_nextflow,
+            path_to_sarek,
+            **sarek_args):
+        self.nf_path = path_to_nextflow
+        self.sarek_path = path_to_sarek
+        self.sarek_args = {k: v for k, v in sarek_args.items() if k not in ["nf_path", "sarek_path"]}
 
     def _append_argument(self, base_string, name, hyphen="--"):
-        if getattr(self, name) is None:
+        if self.sarek_args.get(name) is None:
             return base_string
         return "{0} {2}{1} ${{{1}}}".format(base_string, name, hyphen)
 
     def command_line(self):
-        template_string = self._append_argument("${nf_path} run ${sarek_step_path}", "profile", hyphen="-")
-        for argument_name in ["sample", "step", "tools", "genome", "outDir"]:
-            template_string = self._append_argument(template_string, argument_name)
+        single_hyphen_args = ["config", "profile"]
+        template_string = "${nf_path} run ${sarek_step_path}"
+        for argument_name in single_hyphen_args:
+            template_string = self._append_argument(template_string, argument_name, hyphen="-")
+        for argument_name in filter(lambda n: n not in single_hyphen_args, self.sarek_args.keys()):
+            template_string = self._append_argument(template_string, argument_name, hyphen="--")
+        args_with_expanded_lists = {k: v if type(v) is not list else ",".join(v) for k, v in self.sarek_args.items()}
         command_line = Template(template_string).substitute(
             nf_path=self.nf_path,
             sarek_step_path=os.path.join(self.sarek_path, self.sarek_step()),
-            profile=self.profile,
-            sample=self.sample,
-            step=self.step,
-            tools=",".join(self.tools or []),
-            genome=self.genome,
-            outDir=self.outDir)
+            **args_with_expanded_lists)
         return command_line
 
     @classmethod
