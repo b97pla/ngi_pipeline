@@ -173,9 +173,9 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
 
     CONFIG = {
         "profile": "this-is-a-profile",
-        "tools": ["tool-A", "tool-B"],
-        "nf_path": "this-is-the-nextflow-path",
-        "sarek_path": "this-is-the-sarek-path",
+        "tools": ["haplotypecaller", "manta"],
+        "nf_path": os.path.join("/this", "is", "the", "nextflow", "path"),
+        "sarek_path": os.path.join("/this", "is", "the", "path", "to", "sarek"),
         "genome": "this-is-the-genome"}
 
     def setUp(self):
@@ -320,9 +320,9 @@ class TestReferenceGenome(unittest.TestCase):
 class TestSarekWorkflowStep(unittest.TestCase):
 
     def setUp(self):
-        self.nf_path = os.path.join("this", "is", "the", "nextflow", "path")
-        self.sarek_path = os.path.join("this", "is", "the", "path", "to", "sarek")
-        self.sarek_workflow_step = SarekWorkflowStep(self.nf_path, self.sarek_path)
+        self.sarek_args = TestSarekGermlineAnalysis.CONFIG.copy()
+        self.sarek_workflow_step = SarekWorkflowStep(
+            self.sarek_args["nf_path"], self.sarek_args["sarek_path"], **self.sarek_args)
 
     def test__append_argument(self):
         base_string = "this-is-the-base-string"
@@ -363,46 +363,29 @@ class TestSarekWorkflowStep(unittest.TestCase):
 
     def test_command_line(self):
         sarek_step = "sarek_step"
-        with mock.patch.object(self.sarek_workflow_step, "sarek_step", return_value=sarek_step) as sarek_step_mock:
+        sarek_workflow_step = SarekWorkflowStep(self.sarek_args["nf_path"], self.sarek_args["sarek_path"])
+        with mock.patch.object(sarek_workflow_step, "sarek_step", return_value=sarek_step) as sarek_step_mock:
             expected_command_line = "{} run {}".format(
-                self.nf_path,
-                os.path.join(self.sarek_path, sarek_step))
-            self.assertEqual(expected_command_line, self.sarek_workflow_step.command_line())
+                self.sarek_args["nf_path"],
+                os.path.join(self.sarek_args["sarek_path"], sarek_step))
+            self.assertEqual(expected_command_line, sarek_workflow_step.command_line())
             sarek_step_mock.assert_called_once()
 
     def test_command_line_args(self):
-        expected_kwargs = {
-            k: v for k, v in TestSarekGermlineAnalysis.CONFIG.items() if k not in ["nf_path", "sarek_path"]}
-        self.sarek_workflow_step = SarekWorkflowStep(self.nf_path, self.sarek_path, **expected_kwargs)
         sarek_step = "sarek_step"
+        valid_tools = self.sarek_args["tools"]
         with mock.patch.object(self.sarek_workflow_step, "sarek_step", return_value=sarek_step):
             observed_command_line = self.sarek_workflow_step.command_line()
-            self.assertIn("--tools {}".format(",".join(expected_kwargs["tools"])), observed_command_line)
-            del(expected_kwargs["tools"])
-            for key, value in expected_kwargs.items():
-                self.assertIn("-{} {}".format(key, value), observed_command_line)
+            self.assertNotIn("--tools", observed_command_line)
+            for key, value in self.sarek_args.items():
+                if key not in ["tools", "sarek_path", "nf_path"]:
+                    self.assertIn("-{} {}".format(key, value), observed_command_line)
 
-
-class TestSarekPreprocessingStep(unittest.TestCase):
-
-    def setUp(self):
-        self.output_dir = os.path.join("/path", "to", "output", "dir")
-        self.result_dirs = [
-            os.path.join(self.output_dir, "Preprocessing", "Recalibrated"),
-            os.path.join(self.output_dir, "Preprocessing", "NonRecalibrated"),
-            os.path.join(self.output_dir, "Preprocessing", "NonRealigned")
-        ]
-        self.step_tsv_files = [
-            os.path.join(self.result_dirs[0], "recalibrated.tsv"),
-            os.path.join(self.result_dirs[1], "nonRecalibrated.tsv"),
-            os.path.join(self.result_dirs[2], "nonRealigned.tsv")
-        ]
-
-    def test_sample_analysis_output_dirs(self):
-        self.assertListEqual(self.result_dirs, SarekPreprocessingStep.sample_analysis_output_dirs(self.output_dir))
-
-    def sample_analysis_tsv_file(self):
-        self.assertListEqual(self.step_tsv_files, SarekPreprocessingStep.sample_analysis_tsv_file(self.output_dir))
+    def test_valid_tools(self):
+        self.sarek_workflow_step.available_tools = []
+        self.assertListEqual([], self.sarek_workflow_step.valid_tools(["A", "B", "C", "D"]))
+        self.sarek_workflow_step.available_tools = ["B", "D"]
+        self.assertListEqual(["B", "D"], self.sarek_workflow_step.valid_tools(["A", "B", "C", "D"]))
 
 
 class TestSampleFastq(unittest.TestCase):

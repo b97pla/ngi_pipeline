@@ -1,5 +1,8 @@
+import time
+
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import SampleNotValidForAnalysisError
+from ngi_pipeline.engines.sarek.local_process_tracking import update_charon_with_local_jobs_status
 from ngi_pipeline.engines.sarek.models import SarekAnalysis
 from ngi_pipeline.engines.sarek.process import SlurmConnector
 
@@ -42,3 +45,11 @@ def analyze(analysis_object):
             analysis_engine.analyze_sample(sample_object, analysis_object)
         except SampleNotValidForAnalysisError as e:
             analysis_object.log.error(e)
+
+    # finally, let's force a sync of the local SQLite DB and Charon
+    time.sleep(5)
+    update_charon_with_local_jobs_status(
+        config=analysis_object.config,
+        log=analysis_object.log,
+        tracking_connector=tracking_connector,
+        charon_connector=charon_connector)
