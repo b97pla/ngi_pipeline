@@ -22,7 +22,10 @@ def analyze(analysis_object):
     slurm_project_id = analysis_object.config["environment"]["project_id"]
     slurm_mail_user = analysis_object.config["mail"]["recipient"]
     slurm_conector = SlurmConnector(
-        slurm_project_id, slurm_mail_user, cwd="/scratch", slurm_mail_events="TIME_LIMIT_80")
+        slurm_project_id, slurm_mail_user,
+        cwd="/scratch",
+        slurm_mail_events="TIME_LIMIT_80",
+        **analysis_object.config.get("slurm", {}))
 
     # get a CharonConnector that will interface with the Charon database
     charon_connector = CharonConnector(analysis_object.config, analysis_object.log)

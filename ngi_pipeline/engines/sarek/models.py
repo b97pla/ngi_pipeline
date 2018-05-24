@@ -464,8 +464,7 @@ class SarekAnnotateStep(SarekWorkflowStep):
 
     available_tools = [
         "snpeff",
-        "vep",
-        "merge"
+        "vep"
     ]
 
     def sarek_step(self):
