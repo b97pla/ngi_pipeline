@@ -8,7 +8,7 @@ from ngi_pipeline.engines.sarek.database import CharonConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized, \
     SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekGermlineAnalysis, ReferenceGenome, \
-    SarekWorkflowStep, SampleFastq, Runfolder
+    SarekWorkflowStep, SarekPreprocessingStep, SampleFastq, Runfolder
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
@@ -381,6 +381,28 @@ class TestSarekWorkflowStep(unittest.TestCase):
             del(expected_kwargs["tools"])
             for key, value in expected_kwargs.items():
                 self.assertIn("-{} {}".format(key, value), observed_command_line)
+
+
+class TestSarekPreprocessingStep(unittest.TestCase):
+
+    def setUp(self):
+        self.output_dir = os.path.join("/path", "to", "output", "dir")
+        self.result_dirs = [
+            os.path.join(self.output_dir, "Preprocessing", "Recalibrated"),
+            os.path.join(self.output_dir, "Preprocessing", "NonRecalibrated"),
+            os.path.join(self.output_dir, "Preprocessing", "NonRealigned")
+        ]
+        self.step_tsv_files = [
+            os.path.join(self.result_dirs[0], "recalibrated.tsv"),
+            os.path.join(self.result_dirs[1], "nonRecalibrated.tsv"),
+            os.path.join(self.result_dirs[2], "nonRealigned.tsv")
+        ]
+
+    def test_sample_analysis_output_dirs(self):
+        self.assertListEqual(self.result_dirs, SarekPreprocessingStep.sample_analysis_output_dirs(self.output_dir))
+
+    def sample_analysis_tsv_file(self):
+        self.assertListEqual(self.step_tsv_files, SarekPreprocessingStep.sample_analysis_tsv_file(self.output_dir))
 
 
 class TestSampleFastq(unittest.TestCase):
