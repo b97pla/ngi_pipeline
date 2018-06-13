@@ -55,6 +55,11 @@ def workflow_qc(input_files, output_dir, config):
         except ValueError as e:
             LOG.error('Could not create command line for workflow '
                       '"{}" ({})'.format(workflow_name, e))
+    # If specified in the config generate md5 for the fastq files
+    if config.get("qc", {}).get("make_md5", False):
+        md5_fls = 'files_for_md5="{}"'.format(" ".join(flatten(input_files)))
+        md5_cmd = "for fl in $files_for_md5; do md5sum $fl | awk '{printf $1}' > ${fl}.md5; done"
+        cl_list.append([md5_fls, md5_cmd])
     return cl_list
 
 
@@ -184,7 +189,7 @@ def workflow_fastq_screen(input_files, output_dir, config):
 
 def fastq_to_be_analysed(fastq_files, analysis_dir, output_footers):
     """Produces a list of couples, the first element is the file itself, the second is the name of the soflink to be created.
-    
+
     :param list fastq_files: The list of fastq files to analyze
     :param str analysis_dir: the folder where the analysis results will be stored
     :param list output_footers: the list of footers that indicate analysis have been already run
