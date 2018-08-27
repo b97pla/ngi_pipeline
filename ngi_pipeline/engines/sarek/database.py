@@ -10,7 +10,12 @@ from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotSpecifi
 
 
 class CharonConnector:
+    """
+    The CharonConnector class provides an interface to the Charon database. Underneath, it uses the
+    ngi_pipeline.database.classes.CharonSession class. Connection credentials are picked up from environment variables.
+    """
 
+    # mapping between a process status and the corresponding analysis status to record in Charon
     _ANALYSIS_STATUS_FROM_PROCESS_STATUS = {
         ProcessRunning: "UNDER_ANALYSIS",
         ProcessExitStatusSuccessful: "ANALYZED",
@@ -18,6 +23,7 @@ class CharonConnector:
         ProcessExitStatusUnknown: "FAILED"
     }
 
+    # mapping between an analysis status and the corresponding alignment status to record in Charon
     _ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS = {
         "TO_ANALYZE": "NOT_RUNNING",
         "UNDER_ANALYSIS": "RUNNING",
@@ -26,6 +32,13 @@ class CharonConnector:
     }
 
     def __init__(self, config, log, charon_session=None):
+        """
+        Create a CharonConnector object which provides an interface to the Charon sample tracking database.
+
+        :param config: dict with configuration options
+        :param log: a log handle where the connector will log its output
+        :param charon_session: an active database session to use, if not specified, a new session will be created
+        """
         self.config = config
         self.log = log
         self.charon_session = charon_session or CharonSession(config=self.config)
@@ -71,22 +84,43 @@ class CharonConnector:
 
     def set_sample_analysis_status(
             self, projectid, sampleid, status, recurse=False, restrict_to_libpreps=None, restrict_to_seqruns=None):
+        """
+        Set the analysis status on a sample to the specified string. If recurse is True, the alignment status on
+        the affected seqruns will be set as well (to the string corresponding to the analysis status according to
+        the CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS mapping. Optionally, the libpreps and seqruns to
+        recurse into can be restricted.
+
+        :param projectid: the Charon projectid of the project to update
+        :param sampleid: the Charon sampleid of the sample to update
+        :param status: the analysis status to set as a string
+        :param recurse: if True, the seqruns belonging to the sample will also be updated with the corresponding
+        alignment status (default is False)
+        :param restrict_to_libpreps: list with libpreps to restrict the recursion to. If specified, only seqruns
+        belonging to libpreps in this list will be recursed into. Default is to iterate over seqruns in all libpreps
+        :param restrict_to_seqruns: dict with libprepids as keys and a list with seqrunids as values. If specified,
+        the seqruns to update for a libprepid will be restricted to the seqruns in the list. Default is to update
+        all seqruns for the libpreps iterated over
+        :return:
+        """
         try:
             if recurse:
-                # update the status for all seqruns
+                # iterate over all libpreps, taking the restrict_to_libpreps argument into account
                 for libprep in self.sample_libpreps(
                         projectid, sampleid, restrict_to=restrict_to_libpreps):
                     libprepid = libprep["libprepid"]
+                    # iterate over the seqruns for the libprep and restrict to the specified seqruns if the libprep is
+                    # a key in the restrict_to_seqruns dict
                     for seqrun in self.libprep_seqruns(
                             projectid, sampleid, libprepid,
                             restrict_to=restrict_to_seqruns.get(libprepid) if restrict_to_seqruns else None):
+                        # set the alignment status on the seqrun according to the mapping
                         self.set_seqrun_alignment_status(
                             projectid,
                             sampleid,
                             libprepid,
                             seqrun["seqrunid"],
                             self.alignment_status_from_analysis_status(status))
-
+            # lastly, update the analysis status of the sample
             return self.charon_session.sample_update(projectid, sampleid, analysis_status=status)
         except CharonError as e:
             analysis_status_exception = SampleAnalysisStatusNotSetError(projectid, sampleid, status, reason=e)
@@ -94,6 +128,14 @@ class CharonConnector:
             raise analysis_status_exception
 
     def sample_libpreps(self, projectid, sampleid, restrict_to=None):
+        """
+        Get all libpreps for a sample, optionally filtered by libprepid
+
+        :param projectid: the project to get libpreps for
+        :param sampleid: the sample to get libpreps for
+        :param restrict_to: list with libprepids. If specified, only libpreps whose id is in the list will be returned
+        :return: list of libpreps, represented as dicts, belonging to the specified sample
+        """
         try:
             return filter(
                 lambda x: restrict_to is None or x["libprepid"] in restrict_to,
@@ -104,6 +146,15 @@ class CharonConnector:
             raise sample_libpreps_exception
 
     def libprep_seqruns(self, projectid, sampleid, libprepid, restrict_to=None):
+        """
+        Get all seqruns for a libprep, optionally filtered by seqrunid
+
+        :param projectid: the project to get seqruns for
+        :param sampleid: the sample to get seqruns for
+        :param libprepid: the libprep to get seqruns for
+        :param restrict_to: list with seqrunids. If specified, only seqruns whose id is in the list will be returned
+        :return: list of seqruns, represented as dicts, belonging to the specified libprep
+        """
         try:
             return filter(
                 lambda x: restrict_to is None or x["seqrunid"] in restrict_to,
@@ -140,18 +191,35 @@ class CharonConnector:
 
 
 class TrackingConnector:
+    """
+    The TrackingConnector class provides an interface to the local SQLite tracking database. Underneath, it uses some
+    of the code from ngi_pipeline.engines.piper_ngi.database
+    """
 
+    # mapping between process connector types and the corresponding db field storing the job identifier
     PIDFIELD_FROM_PROCESS_CONNECTOR_TYPE = {
         ProcessConnector: "process_id",
         SlurmConnector: "slurm_job_id"
     }
 
     def __init__(self, config, log, tracking_session=None):
+        """
+        Create a TrackingConnector instance that provides an interface to the local tracking database.
+
+        :param config: dict with configuration options
+        :param log: a log handle where the connector will log its output
+        :param tracking_session: a database session to use for the connection. If not specified, a new session will
+        be created as necessary
+        """
         self.config = config
         self.log = log
         self.tracking_session = tracking_session
 
     class _SampleAnalysis(SampleAnalysis):
+        """
+        Subclassing the SampleAnalysis model from ngi_pipeline.engines.piper_ngi.database so that we can override
+        stuff if necessary
+        """
         pass
 
     @staticmethod
@@ -160,6 +228,10 @@ class TrackingConnector:
 
     @contextlib.contextmanager
     def db_session(self):
+        """
+        Context manager for the database session
+        :return: a database session
+        """
         if self.tracking_session is not None:
             yield self.tracking_session
         else:
@@ -168,8 +240,22 @@ class TrackingConnector:
                 yield self.tracking_session
 
     def record_process_sample(
-            self, projectid, sampleid, project_base_path, analysis_type, engine, pid, pidfield):
+            self, projectid, sampleid, project_base_path, analysis_type, engine, pid, process_connector_type):
+        """
+        Add the processing details for a sample as a record in the tracking database. The database model is defined
+        by the _SampleAnalysis class.
 
+        :param projectid: project id for the sample
+        :param sampleid: sample id for the sample
+        :param project_base_path: path to the project base
+        :param analysis_type: the name of the analysis instance class (e.g. SarekAnalysisGermline)
+        :param engine: the name of the analysis engine (e.g. sarek)
+        :param pid: the process or job id for the analysis
+        :param process_connector_type: the type of the process connector used to start the analysis
+        """
+        # different database fields are used to record the process id depending on if it's a slurm job or a local job,
+        # therefore we'll map the process connector type to the corresponding name of the field
+        pidfield = self.pidfield_from_process_connector_type(process_connector_type)
         db_obj = self._SampleAnalysis(
             project_id=projectid,
             project_name=projectid,
@@ -184,11 +270,19 @@ class TrackingConnector:
             db_session.commit()
 
     def remove_analysis(self, analysis):
+        """
+        Remove an analysis record from the database
+        :param analysis: the analysis record, as an instance of SampleAnalysis, to remove from the database
+        """
         with self.db_session() as db_session:
             db_session.delete(analysis)
             db_session.commit()
 
     def tracked_analyses(self):
+        """
+        :return: a generator of SampleAnalysis objects representing analyses having "sarek" as the analysis engine
+        that are tracked in the local tracking database
+        """
         with self.db_session() as db_session:
             for analysis in db_session.query(self._SampleAnalysis)\
                     .filter(self._SampleAnalysis.engine == "sarek")\

@@ -11,7 +11,7 @@ def analyze(analysis_object):
     """
     This is the main entry point for launching the Sarek analysis pipeline. This gets called by NGI pipeline for
     projects having the corresponding best_practice_analysis in Charon. It's called per project and the passed analysis
-    object contains (some?) parameters for the analysis.
+    object contains some parameters for the analysis, while others are looked up in the config.
 
     Refer to the ngi_pipeline.conductor.launchers.launch_analysis method to see how the analysis object is created.
 
@@ -33,6 +33,7 @@ def analyze(analysis_object):
     # get a TrackingConnector that will interface with the local SQLite database
     tracking_connector = TrackingConnector(analysis_object.config, analysis_object.log)
 
+    # get a SarekAnlaysis instance that matches the analysis specified in Charon (e.g. germline)
     analysis_object.log.info("Launching SAREK analysis for {}".format(analysis_object.project.project_id))
     analysis_engine = SarekAnalysis.get_analysis_instance_for_project(
         analysis_object.project.project_id,
@@ -42,7 +43,7 @@ def analyze(analysis_object):
         tracking_connector=tracking_connector,
         process_connector=slurm_conector)
 
-    # iterate over the samples and launch analysis for each
+    # iterate over the samples in the project and launch analysis for each
     for sample_object in analysis_object.project:
         try:
             analysis_engine.analyze_sample(sample_object, analysis_object)
