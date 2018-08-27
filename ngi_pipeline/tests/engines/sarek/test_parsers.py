@@ -7,7 +7,7 @@ from ngi_pipeline.engines.sarek.parsers import QualiMapParser
 class TestQualiMapParser(unittest.TestCase):
 
     def setUp(self):
-        locale.setlocale(locale.LC_ALL, 'en_US')
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
         self.examples = {
             "numeric_assignment": [
                 "     std insert size = 1,478,053.3171",
