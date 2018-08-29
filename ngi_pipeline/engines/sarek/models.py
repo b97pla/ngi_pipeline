@@ -22,10 +22,10 @@ class SarekAnalysis(object):
     DEFAULT_CONFIG = {
         "profile": "standard",
         "tools": None,
-        "site_config": None,
-        "sarek_path": "/lupus/ngi/staging/latest/sw/sarek/",
-        "nf_path": "/lupus/ngi/staging/latest/sw/nextflow/nextflow",
-        "containerPath": os.path.join("/lupus/ngi/staging/latest/sw/sarek/", "containers")
+        "config": None,
+        "sarek_path": "/lupus/ngi/production/latest/sw/sarek/",
+        "nf_path": "/lupus/ngi/production/latest/sw/nextflow/nextflow",
+        "containerPath": "/lupus/ngi/staging/latest/resources/singularity/sarek"
     }
 
     def __init__(
