@@ -55,6 +55,21 @@ class NGIObject(object):
             subitem = self._subitems[name] = self._subitem_type(name, dirname)
         return subitem
 
+    def __eq__(self, other):
+        return all([
+            type(self) == type(other),
+            self.name == other.name,
+            self.dirname == other.dirname,
+            self.being_analyzed == other.being_analyzed,
+            self._subitem_type == other._subitem_type,
+            len(self._subitems) == len(other._subitems),
+            all(
+                map(
+                    lambda (s, o): s == o,
+                    zip(
+                        sorted(list(self), key=lambda x: x.name),
+                        sorted(list(other), key=lambda x: x.name))))])
+
     def __iter__(self):
         return iter(self._subitems.values())
 
@@ -78,6 +93,12 @@ class NGIProject(NGIObject):
         self.project_id = project_id
         self.command_lines = []
 
+    def __eq__(self, other):
+        return all([
+            super(NGIProject, self).__eq__(other),
+            self.base_path == other.base_path,
+            self.project_id == other.project_id,
+            self.command_lines == other.command_lines])
 
 class NGISample(NGIObject):
     def __init__(self, *args, **kwargs):
@@ -99,6 +120,19 @@ class NGISeqRun(NGIObject):
         self.fastq_files = self._subitems = []
         ## Not working
         #delattr(self, "_add_subitem")
+
+    def __eq__(self, other):
+        return all([
+            type(self) == type(other),
+            self.name == other.name,
+            self.dirname == other.dirname,
+            len(self._subitems) == len(other._subitems),
+            all(
+                map(
+                    lambda (s, o): s == o,
+                    zip(
+                        sorted(list(self)),
+                        sorted(list(other)))))])
 
     def __iter__(self):
         return iter(self._subitems)
