@@ -25,7 +25,7 @@ class SarekAnalysis(object):
         "config": None,
         "sarek_path": "/lupus/ngi/production/latest/sw/sarek/",
         "nf_path": "/lupus/ngi/production/latest/sw/nextflow/nextflow",
-        "containerPath": "/lupus/ngi/staging/latest/resources/singularity/sarek"
+        "containerPath": "/lupus/ngi/production/latest/resources/singularity/sarek"
     }
 
     def __init__(
