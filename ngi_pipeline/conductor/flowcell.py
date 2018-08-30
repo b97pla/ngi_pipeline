@@ -20,8 +20,7 @@ from ngi_pipeline.utils.communication import mail_analysis
 from ngi_pipeline.utils.filesystem import do_rsync, do_symlink, \
                                           locate_flowcell, safe_makedir
 from ngi_pipeline.utils.parsers import determine_library_prep_from_fcid, \
-                                       determine_library_prep_from_samplesheet, \
-                                       parse_lane_from_filename
+                                       get_sample_numbers_from_samplesheet
 
 LOG = minimal_logger(__name__)
 
@@ -168,6 +167,41 @@ def organize_projects_from_flowcell(demux_fcid_dirs, restrict_to_projects=None,
     return projects_to_analyze
 
 
+def match_fastq_sample_number_to_samplesheet(fastq_file, samplesheet_sample_numbers, project_id=None):
+    """
+    Given the sample numbers deduced from the samplesheet and a fastq file name, will return the corresponsing
+    samplesheet entry, taking sample name, lane number and sample number into account. If project_id is specified,
+    this will also be taken into account.
+
+    :param fastq_file: fastq file name
+    :param samplesheet_sample_numbers: list of samplesheet entries with deduced sample numbers
+    :param project_id: project id. If not specified, this field will not be compared
+    :return: the samplesheet entry corresponding to the fastq file as a list, following the format returned by
+    ngi_pipeline.utils.parsers.get_sample_numbers_from_samplesheet
+    """
+    def _is_a_match(ss_sample, prjid, sname, lnum, snum):
+        return all([
+            ss_sample[0] == snum,
+            ss_sample[5] == int(lnum),
+            ss_sample[2] == sname,
+            (prjid is None or ss_sample[1] == prjid)])
+
+    try:
+        samnple_name, sample_num, lane_num = re.match(
+            r'([\w-]+)_(S\d+)_L(\d{3})_\w+',
+            os.path.basename(fastq_file)).groups()
+        return filter(
+            lambda s: _is_a_match(s, project_id, samnple_name, lane_num, sample_num),
+            samplesheet_sample_numbers)[0]
+    except AttributeError:
+        # the sample and lane numbers could not be identified in fastq file name
+        pass
+    except IndexError:
+        # the sample number and lane number could not be matched to any samplesheet_sample_number
+        pass
+    return None
+
+
 @with_ngi_config
 def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                                        restrict_to_projects=None, restrict_to_samples=None,
@@ -225,11 +259,17 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
     fc_full_id = fc_dir_structure['fc_full_id']
     if not fc_dir_structure.get('projects'):
         LOG.warn("No projects found in specified flowcell directory \"{}\"".format(fc_dir))
+
     # Iterate over the projects in the flowcell directory
     for project in fc_dir_structure.get('projects', []):
         project_name = project['project_name']
         project_original_name = project['project_original_name']
         samplesheet_path = fc_dir_structure.get("samplesheet_path")
+
+        # parse the samplesheet and get the expected sample numbers assigned by bcl2fastq
+        samplesheet_sample_numbers = get_sample_numbers_from_samplesheet(
+            samplesheet_path) if samplesheet_path else None
+
         try:
             # Maps e.g. "Y.Mom_14_01" to "P123"
             project_id = get_project_id_from_name(project_name)
@@ -288,17 +328,16 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
             # Note again that these objects only get created if they don't yet exist;
             # if they do exist, the existing object is returned
             for fq_file in fastq_files:
-                # Try to parse from SampleSheet
-                try:
-                    if not samplesheet_path: raise ValueError()
-                    lane_num = re.match(r'[\w-]+_L\d{2}(\d)_\w+', fq_file).groups()[0]
-                    libprep_name = determine_library_prep_from_samplesheet(samplesheet_path,
-                                                                           project_original_name,
-                                                                           sample_name,
-                                                                           lane_num)
-                except (IndexError, ValueError) as e:
-                    LOG.debug('Unable to determine library prep from sample sheet file '
-                              '("{}"); try to determine from Charon'.format(e))
+                # Try to use assignment from SampleSheet
+                samplesheet_sample = match_fastq_sample_number_to_samplesheet(
+                    fq_file,
+                    samplesheet_sample_numbers,
+                    project_id)
+                if samplesheet_sample is not None and \
+                        samplesheet_sample[6] is not None:
+                    libprep_name = samplesheet_sample[6]
+                else:
+                    LOG.debug('Unable to determine library prep from sample sheet file; try to determine from Charon')
                     try:
                         # Requires Charon access
                         libprep_name = determine_library_prep_from_fcid(project_id, sample_name, fc_full_id)
