@@ -111,6 +111,88 @@ def determine_library_prep_from_samplesheet(samplesheet_path, project_id, sample
         raise ValueError(error_msg)
 
 
+def _get_and_trim_field_value(row_dict, fieldnames, trim_away_string=""):
+    """
+    Will search the supplied dict for keys matching the supplied list of fieldnames and return the value of the first
+    encountered, possibly stripped of the supplied trim_away_string
+
+    :param row_dict: a dict to search
+    :param fieldnames: a list of keys to search for
+    :param trim_away_string: if specified, any substrings in the found value matching this string will be trimmed
+    :return: the value of the first key-value pair matched or None if no matching key could be found
+    """
+    try:
+        return filter(
+            lambda v: v is not None,
+            map(
+                lambda k: row_dict.get(k),
+                fieldnames))[0].replace(trim_away_string, "")
+    except IndexError:
+        return None
+
+
+def _get_libprepid_from_description(description):
+    """
+    Given a description from the samplesheet (as formatted by SNP&SEQ), extract the library prep id
+
+    :param description: string with description from samplesheet
+    :return: the libprepid as a string or None if the libprepid could not be identified
+    """
+    # parameters are delimited with ';', values are indicated with ':'
+    try:
+        return filter(
+            lambda param: param.startswith("LIBRARY_NAME:"),
+            description.split(";"))[0].split(":")[1]
+    except IndexError:
+        return None
+
+
+def get_sample_numbers_from_samplesheet(samplesheet_path):
+    """
+    bcl2fastq will number samples based on the order they appear in the samplesheet and use this number in the
+    file name (e.g. _S1_, _S2_ etc.). This method recreates the numbering scheme.
+
+    :param samplesheet_path: path to the samplesheet
+    :return: a list of samples where each sample is a list having the elements:
+       [0] - sample number as a string, e.g. "S1"
+       [1] - project name
+       [2] - sample name
+       [3] - sample id
+       [4] - barcode sequence (separated with '-' if dual index)
+       [5] - lane number
+       [6] - library id if properly parsed from description
+    """
+    samplesheet = parse_samplesheet(samplesheet_path)
+    samples = []
+    seen_samples = []
+    for row in samplesheet:
+        ss_project_id = _get_and_trim_field_value(row, ["SampleProject", "Sample_Project", "Project"], "Project_")
+        ss_sample_name = _get_and_trim_field_value(row, ["SampleName", "Sample_Name"], "Sample_")
+        ss_sample_id = _get_and_trim_field_value(row, ["SampleID", "Sample_ID"], "Sample_")
+        ss_barcode = "-".join(
+            filter(
+                lambda x: x is not None,
+                [
+                    _get_and_trim_field_value(row, ["index"]),
+                    _get_and_trim_field_value(row, ["index2"])]))
+        ss_lane_num = int(_get_and_trim_field_value(row, ["Lane"]))
+        ss_libprepid = _get_libprepid_from_description(
+            _get_and_trim_field_value(row, ["Description"]))
+        fingerprint = "-".join([ss_project_id, ss_sample_id, ss_barcode])
+        if fingerprint not in seen_samples:
+            seen_samples.append(fingerprint)
+        ss_sample_number = seen_samples.index(fingerprint) + 1
+        samples.append([
+            "S{}".format(str(ss_sample_number)),
+            ss_project_id,
+            ss_sample_name,
+            ss_sample_id,
+            ss_barcode,
+            ss_lane_num,
+            ss_libprepid
+        ])
+    return samples
+
 @memoized
 def parse_samplesheet(samplesheet_path):
     """Parses an Illumina SampleSheet.csv and returns a list of dicts
