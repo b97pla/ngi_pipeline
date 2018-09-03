@@ -199,6 +199,9 @@ def match_fastq_sample_number_to_samplesheet(fastq_file, samplesheet_sample_numb
     except IndexError:
         # the sample number and lane number could not be matched to any samplesheet_sample_number
         pass
+    except TypeError:
+        # the list of samplesheet entries was None
+        pass
     return None
 
 

@@ -23,6 +23,7 @@ class TestFlowcell(unittest.TestCase):
             ["not-sample-name_S2_L002_R1_001.fastq.gz", test_samples["S1"]+test_samples["S2"], None, None],
             ["sample-name_S2_L003_R1_001.fastq.gz", test_samples["S1"]+test_samples["S2"], None, None],
             ["sample-name_S3_L003_R1_001.fastq.gz", test_samples["S1"]+test_samples["S2"], None, None],
+            ["sample-name_S3_L004_R1_001.fastq.gz", None, None, None],
             ["sample-name_S3_L004_R1_001.fastq.gz", [], None, None],
             ["sample-name_S3_L004_R1_001.fastq.gz", [[]], None, None],
             ["sample-name_SX_L004_R1_001.fastq.gz", test_samples["S1"] + test_samples["S2"], None, None]
