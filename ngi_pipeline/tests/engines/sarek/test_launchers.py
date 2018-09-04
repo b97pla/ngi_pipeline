@@ -24,6 +24,7 @@ class TestLaunchers(unittest.TestCase):
             seqrun_name = "180411_ST-0123_001{}_AABC00{}CXY".format(name, name)
             seqrun = libprep.add_seqrun(seqrun_name, seqrun_name)
             seqrun.add_fastq_files(["{}_S{}_L001_R{}_001.fastq.gz".format(libprep.name, name, i) for i in range(1, 3)])
+            seqrun.add_fastq_files(["{}_S{}_L001_I1_001.fastq.gz".format(libprep.name, name)])
 
     @staticmethod
     def add_libpreps(sample):

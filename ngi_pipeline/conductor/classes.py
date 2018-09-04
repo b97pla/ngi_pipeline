@@ -155,19 +155,17 @@ def get_engine_for_bp(project, config=None, config_file_path=None):
     charon_session = CharonSession()
     try:
         best_practice_analysis = charon_session.project_get(project.project_id)["best_practice_analysis"]
-        if not best_practice_analysis:
-            raise KeyError("For once in my life ever can't you just fill in the forms properly")
     except KeyError:
         error_msg = ('No best practice analysis specified in Charon for '
                      'project "{}". Using "whole_genome_reseq"'.format(project))
-        LOG.error(error_msg)
-        best_practice_analysis = "whole_genome_reseq"
+        raise RuntimeError(error_msg)
     try:
         analysis_module = load_engine_module(best_practice_analysis, config)
     except RuntimeError as e:
         raise RuntimeError('Project "{}": {}'.format(project, e))
     else:
         return analysis_module
+
 
 def load_engine_module(best_practice_analysis, config):
     try:
