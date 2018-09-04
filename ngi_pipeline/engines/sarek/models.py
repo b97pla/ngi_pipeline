@@ -8,7 +8,7 @@ from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecogni
     SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.process import ProcessConnector, ProcessRunning, ProcessExitStatusSuccessful, \
     ProcessExitStatusFailed
-from ngi_pipeline.utils.filesystem import safe_makedir
+from ngi_pipeline.utils.filesystem import safe_makedir, is_index_file
 
 
 class SarekAnalysis(object):
@@ -433,8 +433,12 @@ class SarekGermlineAnalysis(SarekAnalysis):
                         seqrun.name))
                 flowcellid = runfolder.flowcell_id
                 # iterate over the fastq file pairs belonging to the seqrun
-                for sample_fastq_file_pair in SarekGermlineAnalysis._sample_fastq_file_pair(
-                        map(lambda f: SampleFastq(os.path.join(runfolder.path, f)), seqrun.fastq_files)):
+                sample_fastq_objects = map(
+                    lambda f: SampleFastq(os.path.join(runfolder.path, f)),
+                    filter(
+                        lambda fq: not is_index_file(fq),
+                        seqrun.fastq_files))
+                for sample_fastq_file_pair in SarekGermlineAnalysis._sample_fastq_file_pair(sample_fastq_objects):
                     runid = "{}.{}.{}".format(
                         flowcellid, sample_fastq_file_pair[0].lane_number, sample_fastq_file_pair[0].sample_number)
                     rows.append(
