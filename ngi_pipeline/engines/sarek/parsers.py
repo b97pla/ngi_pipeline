@@ -4,6 +4,8 @@ import locale
 import re
 import string
 
+from ngi_pipeline.engines.sarek.exceptions import ParserException
+
 
 class MultiQCParser:
 
@@ -38,17 +40,39 @@ class MultiQCParser:
 
 class QualiMapParser:
 
+    AUTOSOMES = [str(i) for i in range(1, 23)]
+
     def __init__(self):
         self.data = {}
 
     def parse_genome_results(self, genome_results_file):
         locale.setlocale(locale.LC_ALL, '')
         with open(genome_results_file) as fh:
-            for line in fh:
-                self.data.update(self._parse_entry(line))
+            self._parse_genome_results_lines(fh)
+
+    def _parse_genome_results_lines(self, fh):
+        for line in fh:
+            self.data.update(self._parse_entry(line))
 
     def get_autosomal_coverage(self):
-        pass
+        mapped_bases = 0
+        total_bases = 0
+        for key in ["chr{} coverage".format(chr) for chr in self.AUTOSOMES]:
+            try:
+                data = self.data.get(key) or self.data[key[3:]]
+                mapped_bases += data["mapped bases"]
+                total_bases += data["length"]
+            except KeyError as ke:
+                raise ParserException(
+                    self, "no coverage data parsed for {}: {}".format(key.split()[0], ke))
+        return float(1. * mapped_bases / total_bases)
+
+    def get_total_reads(self):
+        try:
+            return self.data["number of reads"]
+        except KeyError:
+            # no matching key was found
+            pass
 
     @staticmethod
     def _parse_numeric_assignment(line):
@@ -112,3 +136,59 @@ class QualiMapParser:
                self._parse_cumulative_coverage(line) or \
                self._parse_contig_coverage(line) or \
                dict()
+
+
+class PicardMarkDuplicatesParser:
+
+    def __init__(self):
+        self.data = []
+
+    def parse_metrics_file(self, metrics_file):
+        locale.setlocale(locale.LC_ALL, '')
+        with open(metrics_file, "r") as fh:
+            self._parse_metrics_handle(fh)
+
+    def _parse_metrics_handle(self, fh):
+
+        def __parse_library_lines():
+            local_libraries = []
+            local_line = fh.next().strip()
+            while len(local_line) > 0 and not local_line.startswith("##"):
+                local_libraries.append(
+                    map(
+                        self._convert_to_unit,
+                        local_line.split()))
+                local_line = fh.next().strip()
+            return local_libraries
+
+        for line in fh:
+            if line is None or not line.strip().startswith("## METRICS CLASS"):
+                continue
+            headers = fh.next().strip().split()
+            self.data = [
+                dict(zip(headers, library)) for library in __parse_library_lines()]
+
+    @staticmethod
+    def _convert_to_unit(raw_value):
+        try:
+            return locale.atoi(raw_value)
+        except ValueError:
+            # this was obviously not an integer
+            pass
+        try:
+            return locale.atof(raw_value)
+        except ValueError:
+            # apparently not a float either
+            pass
+        # if all fails, return the value as it is
+        return raw_value
+
+    def get_percent_duplication(self, library=None):
+        libraries = filter(lambda lib: library is None or lib["LIBRARY"] == library, self.data)
+        total_reads = \
+            sum([lib["UNPAIRED_READS_EXAMINED"] for lib in libraries]) + \
+            2*sum([lib["READ_PAIRS_EXAMINED"] for lib in libraries])
+        duplicate_reads = \
+            sum([lib["UNPAIRED_READ_DUPLICATES"] for lib in libraries]) + \
+            2*sum([lib["READ_PAIR_DUPLICATES"] for lib in libraries])
+        return 100. * duplicate_reads / total_reads

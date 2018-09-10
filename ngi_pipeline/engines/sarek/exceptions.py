@@ -114,3 +114,12 @@ class AlignmentStatusForAnalysisStatusNotFoundError(Exception):
         super(AlignmentStatusForAnalysisStatusNotFoundError, self).__init__(
             "Charon alignment status corresponding to analysis status {} not found".format(analysis_status))
         self.analysis_status = analysis_status
+
+
+class ParserException(Exception):
+
+    def __init__(self, instance, message):
+        super(ParserException, self).__init__(
+            "{} raised an exception: {}".format(type(instance).__name__, message)
+        )
+        self.instance = instance
