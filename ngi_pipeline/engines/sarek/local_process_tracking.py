@@ -2,8 +2,8 @@ import os
 
 from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
-from ngi_pipeline.engines.sarek.models import SarekAnalysis
-from ngi_pipeline.engines.sarek.process import JobStatus, ProcessStatus, ProcessRunning
+from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekAnalysisSample
+from ngi_pipeline.engines.sarek.process import JobStatus, ProcessStatus, ProcessRunning, ProcessExitStatusSuccessful
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.utils.classes import with_ngi_config
 
@@ -37,36 +37,78 @@ def update_charon_with_local_jobs_status(
             analysis.workflow,
             "pid {}".format(analysis.process_id) if analysis.process_id is not None else
             "sbatch job id {}".format(analysis.slurm_job_id)))
-        process_status = get_analysis_status(analysis)
+
+        # get an analysis instance corresponding to the Sarek workflow
+        analysis_instance = SarekAnalysis.get_analysis_instance_for_workflow(
+            analysis.workflow,
+            config,
+            log,
+            charon_connector=charon_connector,
+            tracking_connector=tracking_connector)
+
+        # recreate a NGIProject object from the analysis
+        project_obj = project_from_analysis(analysis, analysis_instance)
+        # extract the sample object corresponding to the analysis entry
+        sample_obj = list(filter(lambda x: x.name == analysis.sample_id, project_obj)).pop()
+        analysis_sample = SarekAnalysisSample(project_obj, sample_obj, analysis_instance)
+
+        # get the analysis status
+        process_status = get_analysis_status(analysis, analysis_instance)
         log.debug(
             "{} with id {} has status {}".format(
                 "process" if analysis.process_id is not None else "job",
                 analysis.process_id or analysis.slurm_job_id,
                 str(process_status)))
 
-        # recreate a NGIProject object from the analysis
-        project_obj = project_from_analysis(analysis)
-        # extract the sample object corresponding to the analysis entry
-        sample_obj = list(filter(lambda x: x.name == analysis.sample_id, project_obj)).pop()
-        # extract the libpreps and seqruns from the sample object
-        restrict_to_seqruns = {}
-        for libprep_obj in sample_obj:
-            restrict_to_seqruns[libprep_obj.name] = list(map(lambda x: x.name, libprep_obj))
-        restrict_to_libpreps = restrict_to_seqruns.keys()
-
         # set the analysis status of the sample in charon, recursing to libpreps and seqruns
-        charon_connector.set_sample_analysis_status(
-            analysis.project_id,
-            analysis.sample_id,
-            charon_connector.analysis_status_from_process_status(process_status),
-            recurse=True,
-            restrict_to_libpreps=restrict_to_libpreps,
-            restrict_to_seqruns=restrict_to_seqruns)
+        report_analysis_status(analysis_sample, process_status)
+        # set the analysis results of the sample in charon if the process has finished successfully
+        report_analysis_results(analysis_sample, process_status)
+
+        # remove the entry from the tracking database, but only if the process is not running
         log.debug(
             "{}removing from local tracking db".format(
                 "not " if process_status is ProcessRunning else ""))
-        # remove the entry from the tracking database, but only if the process is not running
         remove_analysis(analysis, process_status, tracking_connector, force=False)
+
+
+def _get_libpreps_and_seqruns(analysis_sample):
+    # extract the libpreps and seqruns from the sample object
+    restrict_to_seqruns = {
+        libprepid: analysis_sample.libprep_seqrun_ids(libprepid) for libprepid in analysis_sample.sample_libprep_ids()}
+    return restrict_to_seqruns.keys(), restrict_to_seqruns
+
+
+def report_analysis_status(analysis_sample, process_status):
+
+    # set the status in charon, recursing into libpreps and seqruns
+    restrict_to_libpreps, restrict_to_seqruns = _get_libpreps_and_seqruns(analysis_sample)
+    charon_connector = analysis_sample.sarek_analysis.charon_connector
+    charon_connector.set_sample_analysis_status(
+        analysis_sample.projectid,
+        analysis_sample.sampleid,
+        charon_connector.analysis_status_from_process_status(process_status),
+        recurse=True,
+        restrict_to_libpreps=restrict_to_libpreps,
+        restrict_to_seqruns=restrict_to_seqruns)
+
+
+def report_analysis_results(analysis_sample, process_status):
+    # only report the analysis results if the process exited successfully
+    if process_status == ProcessExitStatusSuccessful:
+        return
+
+    restrict_to_libpreps, restrict_to_seqruns = _get_libpreps_and_seqruns(analysis_sample)
+
+    # set the status in charon, recursing into libpreps and seqruns
+    charon_connector = analysis_sample.sarek_analysis.charon_connector
+    charon_connector.set_sample_analysis_status(
+        analysis_sample.projectid,
+        analysis_sample.sampleid,
+        charon_connector.analysis_status_from_process_status(process_status),
+        recurse=True,
+        restrict_to_libpreps=restrict_to_libpreps,
+        restrict_to_seqruns=restrict_to_seqruns)
 
 
 def _project_from_fastq_file_paths(fastq_file_paths):
@@ -94,7 +136,7 @@ def _project_from_fastq_file_paths(fastq_file_paths):
     return project_obj
 
 
-def project_from_analysis(analysis):
+def project_from_analysis(analysis, analysis_instance):
     """
     Recreate a NGIProject object based on an analysis object fetched from the local tracking database. This will
     use the Sarek TSV file and the fastq files and directory structure.
@@ -102,14 +144,13 @@ def project_from_analysis(analysis):
     :param analysis: an analysis object fetched from a tracking connector
     :return: a NGIProject object recreated from the information in the analysis object
     """
-    analysis_type = SarekAnalysis.get_analysis_type_for_workflow(analysis.workflow)
-    tsv_file_path = analysis_type.sample_analysis_tsv_file(
+    tsv_file_path = analysis_instance.sample_analysis_tsv_file(
         analysis.project_base_path, analysis.project_id, analysis.sample_id)
-    fastq_file_paths = analysis_type.fastq_files_from_tsv_file(tsv_file_path)
+    fastq_file_paths = analysis_instance.fastq_files_from_tsv_file(tsv_file_path)
     return _project_from_fastq_file_paths(fastq_file_paths)
 
 
-def get_analysis_status(analysis):
+def get_analysis_status(analysis, analysis_instance):
     """
     Figure out the analysis status of an analysis object from the local tracking database. Will check the exit code
     written to an exit code file if the process is not running.
@@ -119,7 +160,7 @@ def get_analysis_status(analysis):
     """
     status_type = ProcessStatus if analysis.process_id is not None else JobStatus
     processid_or_jobid = analysis.process_id or analysis.slurm_job_id
-    exit_code_path = SarekAnalysis.get_analysis_type_for_workflow(analysis.workflow).sample_analysis_exit_code_path(
+    exit_code_path = analysis_instance.sample_analysis_exit_code_path(
         analysis.project_base_path, analysis.project_id, analysis.sample_id)
     return status_type.get_type_from_processid_and_exit_code_path(processid_or_jobid, exit_code_path)
 
@@ -138,3 +179,12 @@ def remove_analysis(analysis, process_status, tracking_connector, force=False):
     if process_status == ProcessRunning and not force:
         return
     tracking_connector.remove_analysis(analysis)
+
+
+def parse_analysis_reports_and_update_database(projectid, config, log, charon_connector, tracking_connector):
+    analysis_instance = SarekAnalysis.get_analysis_instance_for_project(
+        projectid,
+        config,
+        log,
+        charon_connector=charon_connector,
+        tracking_connector=tracking_connector)

@@ -8,7 +8,7 @@ from ngi_pipeline.engines.sarek.database import CharonConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized, \
     SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekGermlineAnalysis, ReferenceGenome, \
-    SarekWorkflowStep, SarekPreprocessingStep, SampleFastq, Runfolder
+    SarekWorkflowStep, SarekPreprocessingStep, SampleFastq, Runfolder, SarekAnalysisSample
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
@@ -22,6 +22,7 @@ class TestSarekAnalysis(unittest.TestCase):
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
         self.config = TestSarekAnalysis.CONFIG
+        self.analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
 
     def test_get_analysis_instance_for_project_germline(self, charon_connector_mock, reference_genome_mock):
         reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
@@ -132,7 +133,7 @@ class TestSarekAnalysis(unittest.TestCase):
             charon_connector=charon_connector_mock.return_value)
 
         with self.assertRaises(NotImplementedError):
-            sarek_analysis.command_line(None, None)
+            sarek_analysis.command_line(None)
 
     def test_generate_tsv_file_contents(self, charon_connector_mock, reference_genome_mock):
 
@@ -143,7 +144,7 @@ class TestSarekAnalysis(unittest.TestCase):
             charon_connector=charon_connector_mock.return_value)
 
         with self.assertRaises(NotImplementedError):
-            sarek_analysis.generate_tsv_file_contents(None, None)
+            sarek_analysis.generate_tsv_file_contents(None)
 
     def test_create_tsv_file(self, charon_connector_mock, reference_genome_mock):
         sarek_analysis = SarekAnalysis(
@@ -151,16 +152,17 @@ class TestSarekAnalysis(unittest.TestCase):
             self.config,
             self.log,
             charon_connector=charon_connector_mock.return_value)
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
         with mock.patch.object(sarek_analysis, "generate_tsv_file_contents") as tsv_mock, \
-                mock.patch.object(sarek_analysis, "sample_analysis_tsv_file") as tsv_path_mock:
+                mock.patch.object(analysis_sample, "sample_analysis_tsv_file") as tsv_path_mock:
             tsv_mock.return_value = []
-            analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
             with self.assertRaises(SampleNotValidForAnalysisError) as e:
-                sarek_analysis.create_tsv_file(analysis_obj.project.samples.values()[0], analysis_obj)
+                sarek_analysis.create_tsv_file(analysis_sample)
             tsv_mock.return_value = [["this", "is"], ["some", "content"]]
             tempdir = tempfile.mkdtemp(prefix="test_create_tsv_file_")
             tsv_path_mock.return_value = os.path.join(tempdir, "tsv_parent_folder", "tsv_file.tsv")
-            sarek_analysis.create_tsv_file(analysis_obj.project.samples.values()[0], analysis_obj)
+            sarek_analysis.create_tsv_file(analysis_sample)
             self.assertTrue(os.path.exists(tsv_path_mock.return_value))
             shutil.rmtree(tempdir)
 
@@ -181,6 +183,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
         self.config = TestSarekGermlineAnalysis.CONFIG
+        self.analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
 
     def get_instance(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
@@ -198,9 +201,11 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
-        self.config["sample"] = "/path/to/sample-tsv-definition-file"
-        self.config["outDir"] = "/path/to/analysis/output"
-        observed_cmd = sarek_analysis.command_line(self.config["sample"], self.config["outDir"])
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
+        self.config["outDir"] = analysis_sample.sample_analysis_path()
+        self.config["sample"] = analysis_sample.sample_analysis_tsv_file()
+        observed_cmd = sarek_analysis.command_line(analysis_sample)
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
         self.assertIn("--tools {}".format(",".join(self.config["tools"])), observed_cmd)
@@ -212,10 +217,9 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
-        analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
-        sample_obj = analysis_obj.project.samples.values()[0]
-        sample_data_path = SarekAnalysis.sample_data_path(
-            analysis_obj.project.base_path, analysis_obj.project.name, sample_obj.name)
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
+        sample_data_path = analysis_sample.sample_data_path()
         with mock.patch.object(
                 sarek_analysis, "libprep_should_be_started") as libprep_mock, \
                 mock.patch.object(
@@ -225,8 +229,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
                 seqrun_mock.return_value = not start_mode
                 self.assertListEqual(
                     [],
-                    sarek_analysis.generate_tsv_file_contents(
-                        sample_obj, analysis_obj))
+                    sarek_analysis.generate_tsv_file_contents(analysis_sample))
             libprep_mock.return_value = True
             seqrun_mock.return_value = True
             expected_tsv = []
@@ -241,8 +244,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
                             '{}_S{}_L001_R{}_001.fastq.gz'.format(
                                 libprepid, sample_index, read_num)) for read_num in ['1', '2']])
                     expected_tsv.append(tsv_row)
-            observed_tsv = sarek_analysis.generate_tsv_file_contents(
-                sample_obj, analysis_obj)
+            observed_tsv = sarek_analysis.generate_tsv_file_contents(analysis_sample)
             self.assertListEqual(sorted(expected_tsv), sorted(observed_tsv))
 
     def test__sample_fastq_file_pair_sorting(self, *args):
@@ -264,7 +266,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
                         SampleFastq("{}_{}_L00{}_R{}_001.fastq.gz".format(
                             sample_name, sample_number, lane_number, read_number)))
         n = 0
-        for fastq_pair in SarekGermlineAnalysis._sample_fastq_file_pair(
+        for fastq_pair in SarekGermlineAnalysis.sample_fastq_file_pair(
                 sample_fastq_files["1"] + sample_fastq_files["2"]):
             for i in [0, 1]:
                 self.assertEqual(sample_fastq_files[sorted(sample_fastq_files.keys())[i]][n], fastq_pair[i])
@@ -279,20 +281,19 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             "sample_B_S3_L002_R1_001.fastq.gz"
         ])
         n = 0
-        for fastq_pair in SarekGermlineAnalysis._sample_fastq_file_pair(sample_fastq_files):
+        for fastq_pair in SarekGermlineAnalysis.sample_fastq_file_pair(sample_fastq_files):
             self.assertEqual(1, len(fastq_pair))
             self.assertEqual(sample_fastq_files[n], fastq_pair[0])
             n += 1
 
     def test_analyze_sample(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
-        analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
         with mock.patch.object(
                 sarek_analysis, "create_tsv_file", return_value=os.path.join("/path", "to", "tsv", "file")) as tsv_mock:
-            for sample_obj in analysis_obj.project:
-                sarek_analysis.analyze_sample(sample_obj, analysis_obj)
+            for sample_obj in self.analysis_obj.project:
+                sarek_analysis.analyze_sample(sample_obj, self.analysis_obj)
 
     def test_fastq_files_from_tsv_file(self, *args):
         fh, fake_tsv_file = tempfile.mkstemp(prefix="test_fastq_files_from_tsv_")

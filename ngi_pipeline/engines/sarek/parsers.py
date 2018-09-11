@@ -7,10 +7,25 @@ import string
 from ngi_pipeline.engines.sarek.exceptions import ParserException
 
 
-class MultiQCParser:
+class ReportParser:
 
     def __init__(self):
         self.data = {}
+
+    def _raise_implementation_error(self):
+        raise NotImplementedError("{} does not support this metric".format(type(self).__name__))
+
+    def get_percent_duplication(self, *args, **kwargs):
+        self._raise_implementation_error()
+
+    def get_autosomal_coverage(self, *args, **kwargs):
+        self._raise_implementation_error()
+
+    def get_total_reads(self, *args, **kwargs):
+        self._raise_implementation_error()
+
+
+class MultiQCParser(ReportParser):
 
     def data_source(self, tool, section):
         sources = self.data["report_data_sources"][tool][section]
@@ -38,12 +53,9 @@ class MultiQCParser:
         return source_data["raw_total_sequences"]
 
 
-class QualiMapParser:
+class QualiMapParser(ReportParser):
 
     AUTOSOMES = [str(i) for i in range(1, 23)]
-
-    def __init__(self):
-        self.data = {}
 
     def parse_genome_results(self, genome_results_file):
         locale.setlocale(locale.LC_ALL, '')
@@ -138,10 +150,7 @@ class QualiMapParser:
                dict()
 
 
-class PicardMarkDuplicatesParser:
-
-    def __init__(self):
-        self.data = []
+class PicardMarkDuplicatesParser(ReportParser):
 
     def parse_metrics_file(self, metrics_file):
         locale.setlocale(locale.LC_ALL, '')
@@ -165,8 +174,8 @@ class PicardMarkDuplicatesParser:
             if line is None or not line.strip().startswith("## METRICS CLASS"):
                 continue
             headers = fh.next().strip().split()
-            self.data = [
-                dict(zip(headers, library)) for library in __parse_library_lines()]
+            self.data = {"metrics": [
+                dict(zip(headers, library)) for library in __parse_library_lines()]}
 
     @staticmethod
     def _convert_to_unit(raw_value):
@@ -184,7 +193,7 @@ class PicardMarkDuplicatesParser:
         return raw_value
 
     def get_percent_duplication(self, library=None):
-        libraries = filter(lambda lib: library is None or lib["LIBRARY"] == library, self.data)
+        libraries = filter(lambda lib: library is None or lib["LIBRARY"] == library, self.data.get("metrics", []))
         total_reads = \
             sum([lib["UNPAIRED_READS_EXAMINED"] for lib in libraries]) + \
             2*sum([lib["READ_PAIRS_EXAMINED"] for lib in libraries])

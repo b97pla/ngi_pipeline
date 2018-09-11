@@ -6,6 +6,7 @@ from string import Template
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized, \
     SampleNotValidForAnalysisError
+from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser
 from ngi_pipeline.engines.sarek.process import ProcessConnector, ProcessRunning, ProcessExitStatusSuccessful, \
     ProcessExitStatusFailed
 from ngi_pipeline.utils.filesystem import safe_makedir, is_index_file
@@ -92,6 +93,40 @@ class SarekAnalysis(object):
         return None
 
     @staticmethod
+    def get_analysis_instance_for_workflow(
+            workflow,
+            config,
+            log,
+            reference_genome=None,
+            charon_connector=None,
+            tracking_connector=None,
+            process_connector=None):
+        """
+        Factory method returning a SarekAnalysis subclass instance corresponding to the best practice analysis specified
+        by the supplied workflow name.
+
+        :param workflow: name of the workflow
+        :param config: a config dict
+        :param log: a log handle
+        :param reference_genome: an instance of ReferenceGenome. If omitted, it will be None
+        :param charon_connector: a connector instance to the charon database. If None, the default connector will be
+        used
+        :param tracking_connector: a TrackingConnector instance to use for connections to the local tracking database.
+        If not specified, a new connector will be created
+        :param process_connector: a ProcessConnector instance to use for starting the analysis. If not specified, a new
+        connector for local execution will be created
+        :return: an instance of a SarekAnalysis subclass
+        """
+        instance_type = SarekAnalysis.get_analysis_type_for_workflow(workflow)
+        return instance_type(
+            reference_genome,
+            config,
+            log,
+            charon_connector=charon_connector,
+            tracking_connector=tracking_connector,
+            process_connector=process_connector)
+
+    @staticmethod
     def get_analysis_instance_for_project(
             projectid,
             config,
@@ -166,6 +201,60 @@ class SarekAnalysis(object):
         if status in _charon_status_list_from_process_status(ProcessExitStatusFailed):
             return restart_failed_jobs
         return True
+
+    def analyze_sample(self, sample_object, analysis_object):
+        """
+        Start the analysis for the supplied NGISample object and with the analysis details contained within the supplied
+        NGIAnalysis object. If analysis is successfully started, will record the analysis in the local tracking
+        database.
+
+        Before starting, the status of the sample will be checked against the restart options in the analysis object.
+
+        :raises: a SampleNotValidForAnalysisError if the sample is not eligible for analysis based on its status and the
+        analysis options in the NGIAnalysis object
+        :param sample_object: a NGISample object representing the sample to start analysis for
+        :param analysis_object: a NGIAnalysis object containing the details for the analysis
+        :return: None
+        """
+
+        analysis_sample = SarekAnalysisSample(
+            analysis_object.project,
+            sample_object,
+            self,
+            restart_options={
+                "restart_failed_jobs": analysis_object.restart_failed_jobs,
+                "restart_finished_jobs": analysis_object.restart_finished_jobs,
+                "restart_running_jobs": analysis_object.restart_running_jobs})
+
+        if not self.sample_should_be_started(
+                analysis_sample.projectid, analysis_sample.sampleid, analysis_sample.restart_options):
+            raise SampleNotValidForAnalysisError(
+                analysis_sample.projectid, analysis_sample.sampleid, "nothing to analyze")
+
+        # get the paths needed for the analysis
+        self.create_tsv_file(analysis_sample)
+
+        # get the command line to use for the analysis and execute it using the process connector
+        cmd = self.command_line(analysis_sample)
+        pid = self.process_connector.execute_process(
+            cmd,
+            working_dir=analysis_sample.sample_analysis_path(),
+            exit_code_path=analysis_sample.sample_analysis_exit_code_path(),
+            job_name="{}-{}-{}".format(
+                analysis_object.project.name,
+                sample_object.name,
+                str(self)))
+        self.log.info("launched '{}', with {}, pid: {}".format(cmd, type(self.process_connector), pid))
+
+        # record the analysis details in the local tracking database
+        self.tracking_connector.record_process_sample(
+            analysis_sample.projectid,
+            analysis_sample.sampleid,
+            analysis_sample.project_base_path,
+            str(self),
+            "sarek",
+            pid,
+            type(self.process_connector))
 
     def sample_should_be_started(self,
                                  projectid,
@@ -248,92 +337,13 @@ class SarekAnalysis(object):
                 "" if should_be_started else " NOT"))
         return should_be_started
 
-    def analyze_sample(self, sample_object, analysis_object):
-        """
-        Start the analysis for the supplied NGISample object and with the analysis details contained within the supplied
-        NGIAnalysis object. If analysis is successfully started, will record the analysis in the local tracking
-        database.
-
-        Before starting, the status of the sample will be checked against the restart options in the analysis object.
-
-        :raises: a SampleNotValidForAnalysisError if the sample is not eligible for analysis based on its status and the
-        analysis options in the NGIAnalysis object
-        :param sample_object: a NGISample object representing the sample to start analysis for
-        :param analysis_object: a NGIAnalysis object containing the details for the analysis
-        :return: None
-        """
-        projectid = analysis_object.project.project_id
-        restart_options = {
-            "restart_failed_jobs": analysis_object.restart_failed_jobs,
-            "restart_finished_jobs": analysis_object.restart_finished_jobs,
-            "restart_running_jobs": analysis_object.restart_running_jobs}
-
-        if not self.sample_should_be_started(projectid, sample_object.name, restart_options):
-            raise SampleNotValidForAnalysisError(projectid, sample_object.name, "nothing to analyze")
-
-        args_to_collect_paths = [
-            analysis_object.project.base_path,
-            analysis_object.project.dirname,
-            sample_object.name]
-
-        # get the paths needed for the analysis
-        sample_tsv_file = self.create_tsv_file(sample_object, analysis_object)
-        sample_output_dir = self.sample_analysis_path(*args_to_collect_paths)
-        sample_exit_code_path = self.sample_analysis_exit_code_path(*args_to_collect_paths)
-
-        # get the command line to use for the analysis and execute it using the process connector
-        cmd = self.command_line(sample_tsv_file, sample_output_dir)
-        pid = self.process_connector.execute_process(
-            cmd,
-            working_dir=sample_output_dir,
-            exit_code_path=sample_exit_code_path,
-            job_name="{}-{}-{}".format(
-                analysis_object.project.name,
-                sample_object.name,
-                str(self)))
-        self.log.info("launched '{}', with {}, pid: {}".format(cmd, type(self.process_connector), pid))
-
-        # record the analysis details in the local tracking database
-        self.tracking_connector.record_process_sample(
-            analysis_object.project.name,
-            sample_object.name,
-            analysis_object.project.base_path,
-            str(self),
-            "sarek",
-            pid,
-            type(self.process_connector))
-
-    def command_line(self, sample_tsv_file, sample_output_dir):
+    def command_line(self, analysis_sample):
         raise NotImplementedError("command_line should be implemented in the subclasses")
 
-    @classmethod
-    def sample_data_path(cls, base_path, projectid, sampleid):
-        return os.path.join(base_path, "DATA", projectid, sampleid)
-
-    @classmethod
-    def sample_seqrun_path(cls, base_path, projectid, sampleid, libprepid, seqrunid):
-        return os.path.join(cls.sample_data_path(base_path, projectid, sampleid), libprepid, seqrunid)
-
-    @classmethod
-    def sample_analysis_path(cls, base_path, projectid, sampleid):
-        return os.path.join(base_path, "ANALYSIS", projectid, sampleid, cls.__name__)
-
-    @classmethod
-    def sample_analysis_exit_code_path(cls, base_path, projectid, sampleid):
-        return os.path.join(
-            cls.sample_analysis_path(base_path, projectid, sampleid),
-            "{}-{}-{}.exit_code".format(projectid, sampleid, cls.__name__))
-
-    @classmethod
-    def sample_analysis_tsv_file(cls, base_path, projectid, sampleid):
-        return os.path.join(
-            cls.sample_analysis_path(base_path, projectid, sampleid),
-            "{}-{}-{}.tsv".format(projectid, sampleid, cls.__name__))
-
-    def generate_tsv_file_contents(self, sample_object, analysis_object):
+    def generate_tsv_file_contents(self, analysis_sample):
         raise NotImplementedError("creation of sample tsv file contents should be implemented by subclasses")
 
-    def create_tsv_file(self, sample_object, analysis_object):
+    def create_tsv_file(self, analysis_sample):
         """
         Create a tsv file containing the information needed by Sarek for starting the analysis. Will decide the path to
         the tsv file based on the sample amd project information. If the path does not exist, it will be created.
@@ -343,22 +353,52 @@ class SarekAnalysis(object):
         :param analysis_object: a NGIAnalysis object containing the details for the analysis
         :return: the path to the created tsv file
         """
-        rows = self.generate_tsv_file_contents(sample_object, analysis_object)
+        rows = self.generate_tsv_file_contents(analysis_sample)
         if not rows:
             raise SampleNotValidForAnalysisError(
-                analysis_object.project.project_id,
-                sample_object.name,
+                analysis_sample.projectid,
+                analysis_sample.sampleid,
                 "no libpreps or seqruns to analyze")
 
-        tsv_file = self.sample_analysis_tsv_file(
-            analysis_object.project.base_path,
-            analysis_object.project.project_id,
-            sample_object.name)
+        tsv_file = analysis_sample.sample_analysis_tsv_file()
         safe_makedir(os.path.dirname(tsv_file))
         with open(tsv_file, "w") as fh:
             writer = csv.writer(fh, dialect=csv.excel_tab)
             writer.writerows(rows)
         return tsv_file
+
+    @staticmethod
+    def _sample_paths(project_base_path, projectid, sampleid, subroot=None):
+        try:
+            return os.path.join(project_base_path, subroot, projectid, sampleid)
+        except AttributeError:
+            return os.path.join(project_base_path, projectid, sampleid)
+
+    @classmethod
+    def sample_data_path(cls, *args):
+        return cls._sample_paths(*args, subroot="DATA")
+
+    @classmethod
+    def sample_analysis_path(cls, *args):
+        return cls._sample_paths(*args, subroot="ANALYSIS")
+
+    @classmethod
+    def _sample_analysis_file(cls, project_base_path, projectid, sampleid, extension):
+        return os.path.join(
+            cls.sample_analysis_path(project_base_path, projectid, sampleid),
+            "{}-{}-{}.{}".format(
+                projectid,
+                sampleid,
+                cls.__name__,
+                extension))
+
+   @classmethod
+    def sample_analysis_exit_code_path(cls, *args):
+        return cls._sample_analysis_file(*args, extension="exit_code")
+
+    @classmethod
+    def sample_analysis_tsv_file(cls, *args):
+        return cls._sample_analysis_file(*args, extension="tsv")
 
 
 class SarekGermlineAnalysis(SarekAnalysis):
@@ -367,7 +407,20 @@ class SarekGermlineAnalysis(SarekAnalysis):
     methods and configurations are overriding the base class equivalents.
     """
 
-    def command_line(self, sample_tsv_file, sample_output_dir):
+    def processing_steps(self, analysis_sample):
+        # get the path to the nextflow executable and the sarek main script. If not present in the config, rely on the
+        # environment to be aware of them
+        step_args = [
+            self.sarek_config.get("nf_path", "nextflow"),
+            self.sarek_config.get("sarek_path", "sarek")]
+        local_sarek_config = {"outDir": analysis_sample.sample_analysis_path()}
+        local_sarek_config.update(self.sarek_config)
+        return [SarekPreprocessingStep(
+            *step_args, sample=analysis_sample.sample_analysis_tsv_file(), **local_sarek_config)] + map(
+            lambda step: step(*step_args, **local_sarek_config),
+            [SarekGermlineVCStep, SarekAnnotateStep, SarekMultiQCStep])
+
+    def command_line(self, analysis_sample):
         """
         Creates the command line for launching the sample analysis and returns it as a string.
 
@@ -375,24 +428,13 @@ class SarekGermlineAnalysis(SarekAnalysis):
         :param sample_output_dir: the path to the folder where the sample analysis will be run
         :return: the command line as a string
         """
-        # get the path to the nextflow executable and the sarek main script. If not present in the config, rely on the
-        # environment to be aware of them
-        step_args = [
-            self.sarek_config.get("nf_path", "nextflow"),
-            self.sarek_config.get("sarek_path", "sarek")]
-
         # each analysis step is represented by a SarekWorkflowStep instance
-        processing_steps = [
-            SarekPreprocessingStep(*step_args, sample=sample_tsv_file, outDir=sample_output_dir, **self.sarek_config),
-            SarekGermlineVCStep(*step_args, outDir=sample_output_dir, **self.sarek_config),
-            SarekAnnotateStep(*step_args, outDir=sample_output_dir, **self.sarek_config),
-            SarekMultiQCStep(*step_args, outDir=sample_output_dir, **self.sarek_config)
-        ]
         # create the command line by chaining the command lines from each processing step
+        steps = self.processing_steps(analysis_sample)
         return " && ".join(
-            map(lambda step: step.command_line(), processing_steps))
+            map(lambda step: step.command_line(), self.processing_steps(analysis_sample)))
 
-    def generate_tsv_file_contents(self, sample_object, analysis_object):
+    def generate_tsv_file_contents(self, analysis_sample):
         """
         Create the contents of the tsv file used by Sarek for the analysis. This will check the libpreps and seqruns
         and decide whether to include them in the analysis based on QC flag and alignment status, respectively.
@@ -403,48 +445,12 @@ class SarekGermlineAnalysis(SarekAnalysis):
         the fields that should be tab-separated in the tsv file
         """
         rows = []
-        projectid = analysis_object.project.project_id
-        restart_options = {
-            "restart_failed_jobs": analysis_object.restart_failed_jobs,
-            "restart_finished_jobs": analysis_object.restart_finished_jobs,
-            "restart_running_jobs": analysis_object.restart_running_jobs}
-
-        patientid = sample_object.name
+        patientid = analysis_sample.sampleid
         gender = "ZZ"
         status = 0
         sampleid = patientid
-        # filter out libpreps that are not eligible for analysis
-        for libprep in filter(
-                lambda lp: self.libprep_should_be_started(projectid, sampleid, lp.name),
-                sample_object):
-            libprepid = libprep.name
-            # filter out seqruns that are not eligible for analysis
-            for seqrun in filter(
-                    lambda sr: self.seqrun_should_be_started(
-                        projectid, sampleid, libprepid, sr.name, restart_options),
-                    libprep):
-                # the runfolder is represented with a Runfolder object
-                runfolder = Runfolder(
-                    SarekAnalysis.sample_seqrun_path(
-                        analysis_object.project.base_path,
-                        projectid,
-                        sampleid,
-                        libprepid,
-                        seqrun.name))
-                flowcellid = runfolder.flowcell_id
-                # iterate over the fastq file pairs belonging to the seqrun
-                sample_fastq_objects = map(
-                    lambda f: SampleFastq(os.path.join(runfolder.path, f)),
-                    filter(
-                        lambda fq: not is_index_file(fq),
-                        seqrun.fastq_files))
-                for sample_fastq_file_pair in SarekGermlineAnalysis._sample_fastq_file_pair(sample_fastq_objects):
-                    runid = "{}.{}.{}".format(
-                        flowcellid, sample_fastq_file_pair[0].lane_number, sample_fastq_file_pair[0].sample_number)
-                    rows.append(
-                        [patientid, gender, status, sampleid, runid] +
-                        map(
-                            lambda x: x.path, sample_fastq_file_pair))
+        for sample_fastq in analysis_sample.runid_and_fastq_files_for_sample():
+            rows.append([patientid, gender, status, sampleid] + sample_fastq)
         return rows
 
     @staticmethod
@@ -463,7 +469,7 @@ class SarekGermlineAnalysis(SarekAnalysis):
         return fastq_files
 
     @staticmethod
-    def _sample_fastq_file_pair(sample_fastqs):
+    def sample_fastq_file_pair(sample_fastqs):
         """
         Take a list of SampleFastq objects and return a generator where each element is a list containing a fastq file
         pair (if paired-end, for single-end the list will just contain one entry), with first element being R1 and
@@ -486,6 +492,77 @@ class SarekGermlineAnalysis(SarekAnalysis):
             except IndexError:
                 pass
             yield fastqs_to_yield
+
+
+class SarekAnalysisSample:
+
+    def __init__(self, project_object, sample_object, sarek_analysis, restart_options=None):
+        self.sarek_analysis = sarek_analysis
+        self.sampleid = sample_object.name
+        self.projectid = project_object.project_id
+        self.project_base_path = project_object.base_path
+        self.restart_options = {
+            key: False for key in ["restart_failed_jobs", "restart_finished_jobs", "restart_running_jobs"]}
+        self.restart_options.update(restart_options or {})
+        self.sample_ngi_object = sample_object
+
+    def sample_data_path(self):
+        return self.sarek_analysis.sample_data_path(self.project_base_path, self.projectid, self.sampleid)
+
+    def sample_analysis_path(self):
+        return self.sarek_analysis.sample_analysis_path(self.project_base_path, self.projectid, self.sampleid)
+
+    def sample_seqrun_path(self, libprepid, seqrunid):
+        return os.path.join(self.sample_data_path(), libprepid, seqrunid)
+
+    def sample_analysis_exit_code_path(self):
+        return self.sarek_analysis.sample_analysis_exit_code_path(self.project_base_path, self.projectid, self.sampleid)
+
+    def sample_analysis_tsv_file(self):
+        return self.sarek_analysis.sample_analysis_tsv_file(self.project_base_path, self.projectid, self.sampleid)
+
+    def _get_sample_librep(self, libprepid):
+        return list(filter(lambda lp: lp.name == libprepid, self.sample_ngi_object)).pop()
+
+    def sample_libprep_ids(self):
+        return list(map(lambda x: x.name, self.sample_ngi_object))
+
+    def libprep_seqrun_ids(self, libprepid):
+        return list(map(lambda x: x.name, self._get_sample_librep(libprepid)))
+
+    def libpreps_to_analyze(self):
+        return filter(
+            lambda lp: self.sarek_analysis.libprep_should_be_started(
+                self.projectid, self.sampleid, lp.name),
+            self.sample_ngi_object)
+
+    def seqruns_to_analyze(self, libprep):
+        return filter(
+            lambda sr: self.sarek_analysis.seqrun_should_be_started(
+                self.projectid, self.sampleid, libprep.name, sr.name, self.restart_options),
+            libprep)
+
+    def runid_and_fastq_files_for_sample(self):
+        for libprep in self.libpreps_to_analyze():
+            for libprep_fastq in self._get_runid_and_fastq_files_for_libprep(libprep):
+                yield libprep_fastq
+
+    def _get_runid_and_fastq_files_for_libprep(self, libprep):
+        for seqrun in self.seqruns_to_analyze(libprep):
+            for seqrun_fastq in self._get_runid_and_fastq_files_for_seqrun(libprep.name, seqrun):
+                yield seqrun_fastq
+
+    def _get_runid_and_fastq_files_for_seqrun(self, libprepid, seqrun):
+        # the runfolder is represented with a Runfolder object
+        runfolder = Runfolder(self.sample_seqrun_path(libprepid, seqrun.name))
+        # iterate over the fastq file pairs belonging to the seqrun, filter out files with index reads
+        sample_fastq_objects = map(
+            lambda f: SampleFastq(os.path.join(runfolder.path, f)),
+            filter(lambda fq: not is_index_file(fq), seqrun.fastq_files))
+        for sample_fastq_file_pair in SarekGermlineAnalysis.sample_fastq_file_pair(sample_fastq_objects):
+            runid = "{}.{}.{}".format(
+                runfolder.flowcell_id, sample_fastq_file_pair[0].lane_number, sample_fastq_file_pair[0].sample_number)
+            yield [runid] + map(lambda x: x.path, sample_fastq_file_pair)
 
 
 class SampleFastq(object):
@@ -677,11 +754,26 @@ class SarekWorkflowStep(object):
         """
         return list(filter(lambda t: t in self.available_tools, tools))
 
+    @classmethod
+    def report_files(cls, analysis_sample):
+        return []
+
 
 class SarekPreprocessingStep(SarekWorkflowStep):
 
     def sarek_step(self):
         return "main.nf"
+
+    @classmethod
+    def report_files(cls, analysis_sample):
+        report_dir = os.path.join(analysis_sample.sample_analysis_path(), "Reports")
+        return [
+            [
+                QualiMapParser,
+                os.path.join(report_dir, "bamQC", "genome_results.txt")],
+            [
+                PicardMarkDuplicatesParser,
+                os.path.join(report_dir, "MarkDuplicates", "{}.bam.metrics".format(analysis_sample.sampleid))]]
 
 
 class SarekGermlineVCStep(SarekWorkflowStep):
