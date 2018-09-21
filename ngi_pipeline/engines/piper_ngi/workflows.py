@@ -130,7 +130,7 @@ def workflow_dna_variantcalling(qscripts_dir_path, setup_xml_path,
     if job_native_args:
         # This should be a list
         if type(job_native_args) is not list:
-            LOG.warn('jobNative arguments in config file specified in invalid '
+            LOG.warning('jobNative arguments in config file specified in invalid '
                      'format; should be list. Ignoring these parameters.')
         else:
             cl_string += " -jobNative {}".format(" ".join(job_native_args))

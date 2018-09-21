@@ -116,7 +116,7 @@ def remove_previous_genotype_analyses(project_obj):
             except OSError as e:
                 errors.append("{}: {}".format(sample_file, e))
         if errors:
-            LOG.warn("Error when removing one or more files: {}".format("\n".join(errors)))
+            LOG.warning("Error when removing one or more files: {}".format("\n".join(errors)))
     else:
         LOG.debug('No genotype analysis files found to delete for project {} '
                   '/ samples {}'.format(project_obj, ", ".join(project_obj.samples)))
@@ -147,7 +147,7 @@ def remove_previous_sample_analyses(project_obj, sample_obj=None):
             except OSError as e:
                 errors.append("{}: {}".format(sample_file, e))
         if errors:
-            LOG.warn("Error when removing one or more files: {}".format("\n".join(errors)))
+            LOG.warning("Error when removing one or more files: {}".format("\n".join(errors)))
     else:
         LOG.debug('No sample analysis files found to delete for project {} '
                   '/ samples {}'.format(project_obj, ", ".join(project_obj.samples)))

@@ -143,7 +143,7 @@ def execute_command_line(cl, shell=False, stdout=None, stderr=None, cwd=None):
     :raises RuntimeError: If the OS command-line execution failed.
     """
     if cwd and not os.path.isdir(cwd):
-        LOG.warn("CWD specified, \"{}\", is not a valid directory for "
+        LOG.warning("CWD specified, \"{}\", is not a valid directory for "
                  "command \"{}\". Setting to None.".format(cwd, cl))
         ## FIXME Better to just raise an exception
         cwd = None
@@ -322,7 +322,7 @@ def recreate_project_from_filesystem(project_dir,
     samples_pattern = os.path.join(real_project_dir, "*")
     samples = filter(os.path.isdir, glob.glob(samples_pattern))
     if not samples:
-        LOG.warn('No samples found for project "{}"'.format(project_obj))
+        LOG.warning('No samples found for project "{}"'.format(project_obj))
     for sample_dir in samples:
         sample_name = os.path.basename(sample_dir)
         if restrict_to_samples and sample_name not in restrict_to_samples:
@@ -335,7 +335,7 @@ def recreate_project_from_filesystem(project_dir,
         libpreps_pattern = os.path.join(sample_dir, "*")
         libpreps = filter(os.path.isdir, glob.glob(libpreps_pattern))
         if not libpreps:
-            LOG.warn('No libpreps found for sample "{}"'.format(sample_obj))
+            LOG.warning('No libpreps found for sample "{}"'.format(sample_obj))
         for libprep_dir in libpreps:
             libprep_name = os.path.basename(libprep_dir)
             if restrict_to_libpreps and libprep_name not in restrict_to_libpreps:
@@ -349,7 +349,7 @@ def recreate_project_from_filesystem(project_dir,
             seqruns_pattern = os.path.join(libprep_dir, "*_*_*_*")
             seqruns = filter(os.path.isdir, glob.glob(seqruns_pattern))
             if not seqruns:
-                LOG.warn('No seqruns found for libprep "{}"'.format(libprep_obj))
+                LOG.warning('No seqruns found for libprep "{}"'.format(libprep_obj))
             for seqrun_dir in seqruns:
                 seqrun_name = os.path.basename(seqrun_dir)
                 if restrict_to_seqruns and seqrun_name not in restrict_to_seqruns:
@@ -397,7 +397,7 @@ def match_files_under_dir(dirname, pattern, pt_style="regex", realpath=True):
     :rtype: list
     """
     if pt_style not in ("regex", "shell"):
-        LOG.warn('Chosen pattern style "{}" invalid (must be "regex" or "shell"); '
+        LOG.warning('Chosen pattern style "{}" invalid (must be "regex" or "shell"); '
                  'falling back to "regex".')
         pt_style = "regex"
     if pt_style == "regex": pt_comp = re.compile(pattern)

@@ -62,7 +62,7 @@ def analyze(project, sample, quiet=False, config=None, config_file_path=None):
             with open(slurm_jobid_file, 'w') as f:
                 f.write("{}\n".format(slurm_job_id))
         except IOError as e:
-            LOG.warn('Could not write slurm job id for project/sample '
+            LOG.warning('Could not write slurm job id for project/sample '
                      '{}/{} to file "{}" ({}). So... yup. Good luck bro!'.format(e))
 
 
