@@ -197,8 +197,8 @@ def find_projects_from_samples(sample_list):
             else:
                 projects_dict[owner_projects_list[0]].add(sample_name)
     if no_owners_found:
-        LOG.warn("No projects found for the following samples: {}".format(", ".join(no_owners_found)))
+        LOG.warning("No projects found for the following samples: {}".format(", ".join(no_owners_found)))
     if multiple_owners_found:
-        LOG.warn('Multiple projects found with the following samples (owner '
+        LOG.warning('Multiple projects found with the following samples (owner '
                  'could not be unamibugously determined): {}'.format(", ".join(multiple_owners_found)))
     return dict(projects_dict)

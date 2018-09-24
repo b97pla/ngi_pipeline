@@ -499,7 +499,7 @@ if __name__ == "__main__":
                     path_to_project = locate_project(project_id)
                 except ValueError:
                     # Project has not yet been organized from flowcell level
-                    LOG.warn('Project "{}" has not yet been organized from '
+                    LOG.warning('Project "{}" has not yet been organized from '
                              'flowcell to project level; skipping.'.format(project_id))
                     continue
                 project = recreate_project_from_filesystem(project_dir=path_to_project,

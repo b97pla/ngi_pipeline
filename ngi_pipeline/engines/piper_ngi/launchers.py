@@ -73,7 +73,7 @@ def analyze(analysis_object, level='sample', config=None, config_file_path=None)
         elif level == "genotype":
             status_field = "genotype_status"
         else:
-            LOG.warn('Unknown workflow level: "{}"'.format(level))
+            LOG.warning('Unknown workflow level: "{}"'.format(level))
             status_field = "alignment_status" # Or should we abort?
         try:
             check_for_preexisting_sample_runs(analysis_object.project, sample, analysis_object.restart_running_jobs,

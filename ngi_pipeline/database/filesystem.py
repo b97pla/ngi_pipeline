@@ -39,7 +39,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
     except CharonError as e:
         if e.status_code == 400:
             if force_overwrite:
-                LOG.warn('Overwriting data for project "{}"'.format(project))
+                LOG.warning('Overwriting data for project "{}"'.format(project))
                 charon_session.project_update(projectid=project.project_id,
                                               name=project.name,
                                               status=status,
@@ -52,7 +52,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
             raise
     for sample in project:
         if delete_existing:
-            LOG.warn('Deleting existing sample "{}"'.format(sample))
+            LOG.warning('Deleting existing sample "{}"'.format(sample))
             try:
                 charon_session.sample_delete(projectid=project.project_id,
                                              sampleid=sample.name)
@@ -70,7 +70,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
         except CharonError as e:
             if e.status_code == 400:
                 if force_overwrite:
-                    LOG.warn('Overwriting data for project "{}" / '
+                    LOG.warning('Overwriting data for project "{}" / '
                              'sample "{}"'.format(project, sample))
                     charon_session.sample_update(projectid=project.project_id,
                                                  sampleid=sample.name,
@@ -90,13 +90,13 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                 continue
         for libprep in sample:
             if delete_existing:
-                LOG.warn('Deleting existing libprep "{}"'.format(libprep))
+                LOG.warning('Deleting existing libprep "{}"'.format(libprep))
                 try:
                     charon_session.libprep_delete(projectid=project.project_id,
                                                   sampleid=sample.name,
                                                   libprepid=libprep.name)
                 except CharonError as e:
-                    LOG.warn('Could not delete libprep "{}": {}'.format(libprep, e))
+                    LOG.warning('Could not delete libprep "{}": {}'.format(libprep, e))
             try:
                 qc = "PASSED"
                 LOG.info('Creating libprep "{}" with qc status "{}"'.format(libprep, qc))
@@ -109,7 +109,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
             except CharonError as e:
                 if e.status_code == 400:
                     if force_overwrite:
-                        LOG.warn('Overwriting data for project "{}" / '
+                        LOG.warning('Overwriting data for project "{}" / '
                                  'sample "{}" / libprep "{}"'.format(project, sample,
                                                                      libprep))
                         charon_session.libprep_update(projectid=project.project_id,
@@ -128,7 +128,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                     continue
             for seqrun in libprep:
                 if delete_existing:
-                    LOG.warn('Deleting existing seqrun "{}"'.format(seqrun))
+                    LOG.warning('Deleting existing seqrun "{}"'.format(seqrun))
                     try:
                         charon_session.seqrun_delete(projectid=project.project_id,
                                                      sampleid=sample.name,
@@ -153,7 +153,7 @@ def create_charon_entries_from_project(project, best_practice_analysis="whole_ge
                 except CharonError as e:
                     if e.status_code == 400:
                         if force_overwrite:
-                            LOG.warn('Overwriting data for project "{}" / '
+                            LOG.warning('Overwriting data for project "{}" / '
                                      'sample "{}" / libprep "{}" / '
                                      'seqrun "{}"'.format(project, sample,
                                                           libprep, seqrun))

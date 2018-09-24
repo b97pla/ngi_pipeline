@@ -232,7 +232,7 @@ def update_charon_with_local_jobs_status(quiet=False, config=None, config_file_p
                             remote_sample=charon_session.sample_get(projectid=project_id, sampleid=sample_id)
                             charon_status = remote_sample.get(sample_status_field)
                             if charon_status and not charon_status == set_status:
-                                LOG.warn('Tracking inconsistency for {}: Charon status '
+                                LOG.warning('Tracking inconsistency for {}: Charon status '
                                          'for field "{}" is "{}" but local process tracking '
                                          'database indicates it is running. Setting value '
                                          'in Charon to {}.'.format(label, sample_status_field,
@@ -429,7 +429,7 @@ def record_process_sample(project, sample, workflow_subtask, analysis_module_nam
                              'workflow "{}"'.format(slurm_job_id, project, sample, workflow_subtask))
                     break
                 except OperationalError as e:
-                    LOG.warn('Database locked ("{}"). Waiting...'.format(e))
+                    LOG.warning('Database locked ("{}"). Waiting...'.format(e))
                     time.sleep(15)
             else:
                 raise RuntimeError("Could not write to database after three attempts (locked?)")

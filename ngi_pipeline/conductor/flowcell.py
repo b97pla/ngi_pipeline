@@ -261,7 +261,7 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
         return []
     fc_full_id = fc_dir_structure['fc_full_id']
     if not fc_dir_structure.get('projects'):
-        LOG.warn("No projects found in specified flowcell directory \"{}\"".format(fc_dir))
+        LOG.warning("No projects found in specified flowcell directory \"{}\"".format(fc_dir))
 
     # Iterate over the projects in the flowcell directory
     for project in fc_dir_structure.get('projects', []):
@@ -277,7 +277,7 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
             # Maps e.g. "Y.Mom_14_01" to "P123"
             project_id = get_project_id_from_name(project_name)
         except (CharonError, RuntimeError, ValueError) as e:
-            LOG.warn('Could not retrieve project id from Charon (record missing?). '
+            LOG.warning('Could not retrieve project id from Charon (record missing?). '
                      'Using project name ("{}") as project id '
                      '(error: {})'.format(project_name, e))
             project_id = project_name
@@ -350,7 +350,7 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                         libpreps = charon_session.sample_get_libpreps(project_id, sample_name).get('libpreps')
                         if len(libpreps) == 1:
                             libprep_name = libpreps[0].get('libprepid')
-                            LOG.warn('Project "{}" / sample "{}" / seqrun "{}" / fastq "{}" '
+                            LOG.warning('Project "{}" / sample "{}" / seqrun "{}" / fastq "{}" '
                                      'has no libprep information in Charon, but only one '
                                      'library prep is present in Charon ("{}"). Using '
                                      'this as the library prep.'.format(project_name,
@@ -360,7 +360,7 @@ def setup_analysis_directory_structure(fc_dir, projects_to_analyze,
                                                                         libprep_name))
                         elif fallback_libprep:
                             libprep_name = fallback_libprep
-                            LOG.warn('Project "{}" / sample "{}" / seqrun "{}" / fastq "{}" '
+                            LOG.warning('Project "{}" / sample "{}" / seqrun "{}" / fastq "{}" '
                                      'has no libprep information in Charon, but a fallback '
                                      'libprep value of "{}" was supplied -- using this '
                                      'value.'.format(project_name,
@@ -441,7 +441,7 @@ def parse_flowcell(fc_dir):
     LOG.info('Parsing flowcell directory "{}"...'.format(fc_dir))
     samplesheet_path = os.path.join(fc_dir, "SampleSheet.csv")
     if not os.path.exists(samplesheet_path):
-        LOG.warn("Could not find samplesheet in directory {}".format(fc_dir))
+        LOG.warning("Could not find samplesheet in directory {}".format(fc_dir))
         samplesheet_path = None
     else:
         LOG.debug("SampleSheet.csv found at {}".format(samplesheet_path))
@@ -477,7 +477,7 @@ def parse_flowcell(fc_dir):
                                     'sample_name': sample_name,
                                     'files': fastq_files})
         if not project_samples:
-            LOG.warn('No samples found for project "{}" in fc "{}"'.format(project_name, fc_dir))
+            LOG.warning('No samples found for project "{}" in fc "{}"'.format(project_name, fc_dir))
         else:
             projects.append({'data_dir': os.path.relpath(os.path.dirname(project_dir), fc_dir),
                              'project_dir': os.path.basename(project_dir),

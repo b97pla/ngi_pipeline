@@ -134,7 +134,7 @@ def workflow_fastq_screen(input_files, output_dir, config):
     fastq_screen_config_path = config.get("qc", {}).get("fastq_screen", {}).get("config_path")
     # We probably should have the path to the fastq_screen config file written down somewhere
     if not fastq_screen_config_path:
-        LOG.warn('Path to fastq_screen config file not specified; assuming '
+        LOG.warning('Path to fastq_screen config file not specified; assuming '
                  'it is in the same directory as the fastq_screen binary, '
                  'even though I think this is probably a fairly bad '
                  'assumption to make. You\'re in charge, whatever.')

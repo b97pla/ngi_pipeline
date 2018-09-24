@@ -40,7 +40,7 @@ LAUNCH_METHODS = (
 
 def launch_pipeline(run_config, launch_method):
     if launch_method.lower() not in LAUNCH_METHODS:
-        LOG.warn("Launch method \"{}\" not available for run config {}. "\
+        LOG.warning("Launch method \"{}\" not available for run config {}. "\
                  "Valid choices are: {}".format(launch_method, run_config,
                                                 ", ".join(LAUNCH_METHODS)))
         return None
@@ -253,7 +253,7 @@ def build_run_configs(samples_dir=None, config_path=None, output_dir=None, uploa
             project_id = get_project_id_from_filename(sample_basename)
         except ValueError as e:
             # Could not determine project id
-            LOG.warn(e)
+            LOG.warning(e)
             continue
         if not output_dir:
             output_dir = os.path.join(os.path.dirname(os.path.abspath(sample_files[0])), "project_{}".format(sample_basename))

@@ -268,7 +268,7 @@ def find_fastq_read_pairs(file_list):
     file_list = filter(pt.match, file_list)
     if not file_list:
         # No files found
-        LOG.warn("No fastq files found.")
+        LOG.warning("No fastq files found.")
         return {}
     # --> This is the SciLifeLab-Sthlm-specific format (obsolete as of August 1st, hopefully)
     #     Format: <lane>_<date>_<flowcell>_<project-sample>_<read>.fastq.gz
@@ -295,7 +295,7 @@ def find_fastq_read_pairs(file_list):
             if index_file:
                 matches_dict["{}_{}".format(index_file,fc_id)].append(file_pathname)
             else:
-                LOG.warn("Warning: file doesn't match expected file format, "
+                LOG.warning("Warning: file doesn't match expected file format, "
                       "cannot be paired: \"{}\"".format(file_pathname))
                 # File could not be paired, set by itself (?)
                 file_basename_stripsuffix = suffix_pattern.split(file_basename)[0]

@@ -82,7 +82,7 @@ def check_update_jobs_status(projects_to_check=None, config=None, config_file_pa
                     LOG.error(e)
                     continue
             except RuntimeError as e:
-                LOG.warn(e)
+                LOG.warning(e)
                 continue
         else:
             ## FIXME
