@@ -26,19 +26,19 @@ class TestLocalProcessTracking(unittest.TestCase):
             "this-is-the-analysis", ProcessStopped, tracking_connector)
         tracking_connector.remove_analysis.assert_called_once()
 
-    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis.sample_analysis_exit_code_path")
-    def helper_analysis_status(self, process_mock, analysis, exit_code_mock):
+    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis", autospec=True)
+    def helper_analysis_status(self, process_mock, analysis, analysis_instance_mock):
         analysis.project_id = "this-is-a-project-id"
         analysis.sample_id = "this-is-a-sample-id"
         analysis.project_base_path = "this-is-a-project-base-path"
         analysis.workflow = "SarekGermlineAnalysis"
         expected_exit_code_path = "this-is-a-path"
-        exit_code_mock.return_value = expected_exit_code_path
+        analysis_instance_mock.sample_analysis_exit_code_path.return_value = expected_exit_code_path
         expected_status = ProcessRunning
         process_mock.return_value = expected_status
         self.assertEqual(
             expected_status,
-            local_process_tracking.get_analysis_status(analysis))
+            local_process_tracking.get_analysis_status(analysis, analysis_instance_mock))
         process_mock.assert_called_once()
 
     @mock.patch(
@@ -54,37 +54,6 @@ class TestLocalProcessTracking(unittest.TestCase):
         expected_process_id = 98765
         expected_analysis = TrackingConnector._SampleAnalysis(slurm_job_id=expected_process_id)
         self.helper_analysis_status(process_mock, expected_analysis)
-
-    def test_update_charon_with_local_jobs_status(self, charon_connector_mock, tracking_connector_mock):
-        expected_analyses = (
-            TrackingConnector._SampleAnalysis(
-                project_id="this-is-a-project-id-1",
-                sample_id="this-is-a-sample-id",
-                engine="this-is-the-engine",
-                workflow="this-is-the-workflow",
-                process_id=12345),
-            TrackingConnector._SampleAnalysis(
-                project_id="this-is-a-project-id-2",
-                sample_id="this-is-a-sample-id",
-                engine="this-is-the-engine",
-                workflow="this-is-the-workflow",
-                slurm_job_id=98765)
-        )
-        project_obj = NGIProject(None, None, None, None)
-        project_obj.add_sample("this-is-a-sample-id", "this-is-a-sample-id")
-        tracking_connector = tracking_connector_mock.return_value
-        tracking_connector.tracked_analyses.return_value = expected_analyses
-        with mock.patch.object(local_process_tracking, 'get_analysis_status') as analysis_status_mock, \
-                mock.patch.object(local_process_tracking, 'remove_analysis') as remove_mock, \
-                mock.patch.object(local_process_tracking, 'project_from_analysis') as project_mock:
-            project_mock.return_value = project_obj
-            local_process_tracking.update_charon_with_local_jobs_status(
-                config={"this-is-not-an-empty-config": "nope"},
-                log=None,
-                tracking_connector=tracking_connector,
-                charon_connector=charon_connector_mock.return_value)
-            analysis_status_mock.assert_called()
-            remove_mock.assert_called()
 
     def test__project_from_fastq_file_paths(self, *mocks):
         expected_project_obj = TestLaunchers.get_NGIProject("1")

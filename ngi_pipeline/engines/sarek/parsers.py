@@ -7,10 +7,31 @@ import string
 from ngi_pipeline.engines.sarek.exceptions import ParserException
 
 
-class ReportParser:
+class ParserIntegrator:
 
     def __init__(self):
+        self.parsers = []
+
+    def add_parser(self, parser):
+        if not isinstance(parser, ReportParser):
+            raise TypeError("{} is not a sublass of {}".format(type(parser).__name__, type(ReportParser).__name__))
+        self.parsers.append(parser)
+
+    def query_parsers(self, attribute, *args, **kwargs):
+        results = []
+        for parser in self.parsers:
+            try:
+                results.append(getattr(parser, attribute)(*args, **kwargs))
+            except (AttributeError, NotImplementedError):
+                pass
+        return results
+
+
+class ReportParser:
+
+    def __init__(self, result_file):
         self.data = {}
+        self.parse_result_file(result_file)
 
     def _raise_implementation_error(self):
         raise NotImplementedError("{} does not support this metric".format(type(self).__name__))
@@ -24,6 +45,9 @@ class ReportParser:
     def get_total_reads(self, *args, **kwargs):
         self._raise_implementation_error()
 
+    def parse_result_file(self, result_file):
+        raise NotImplementedError("{} has not implemented result parsing".format(type(self).__name__))
+
 
 class MultiQCParser(ReportParser):
 
@@ -31,7 +55,7 @@ class MultiQCParser(ReportParser):
         sources = self.data["report_data_sources"][tool][section]
         return list(sources.keys())
 
-    def parse_json_data(self, json_data_file):
+    def parse_result_file(self, json_data_file):
         with open(json_data_file) as fh:
             self.data = json.load(fh)
 
@@ -57,8 +81,8 @@ class QualiMapParser(ReportParser):
 
     AUTOSOMES = [str(i) for i in range(1, 23)]
 
-    def parse_genome_results(self, genome_results_file):
-        locale.setlocale(locale.LC_ALL, '')
+    def parse_result_file(self, genome_results_file):
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
         with open(genome_results_file) as fh:
             self._parse_genome_results_lines(fh)
 
@@ -152,8 +176,8 @@ class QualiMapParser(ReportParser):
 
 class PicardMarkDuplicatesParser(ReportParser):
 
-    def parse_metrics_file(self, metrics_file):
-        locale.setlocale(locale.LC_ALL, '')
+    def parse_result_file(self, metrics_file):
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
         with open(metrics_file, "r") as fh:
             self._parse_metrics_handle(fh)
 

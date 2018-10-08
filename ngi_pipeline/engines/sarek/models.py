@@ -392,7 +392,7 @@ class SarekAnalysis(object):
                 cls.__name__,
                 extension))
 
-   @classmethod
+    @classmethod
     def sample_analysis_exit_code_path(cls, *args):
         return cls._sample_analysis_file(*args, extension="exit_code")
 
@@ -430,7 +430,6 @@ class SarekGermlineAnalysis(SarekAnalysis):
         """
         # each analysis step is represented by a SarekWorkflowStep instance
         # create the command line by chaining the command lines from each processing step
-        steps = self.processing_steps(analysis_sample)
         return " && ".join(
             map(lambda step: step.command_line(), self.processing_steps(analysis_sample)))
 

@@ -46,30 +46,35 @@ def update_charon_with_local_jobs_status(
             charon_connector=charon_connector,
             tracking_connector=tracking_connector)
 
-        # recreate a NGIProject object from the analysis
-        project_obj = project_from_analysis(analysis, analysis_instance)
-        # extract the sample object corresponding to the analysis entry
-        sample_obj = list(filter(lambda x: x.name == analysis.sample_id, project_obj)).pop()
-        analysis_sample = SarekAnalysisSample(project_obj, sample_obj, analysis_instance)
+        # update the sample status
+        update_charon_with_sample_local_job_status(analysis, analysis_instance, log)
 
-        # get the analysis status
-        process_status = get_analysis_status(analysis, analysis_instance)
-        log.debug(
-            "{} with id {} has status {}".format(
-                "process" if analysis.process_id is not None else "job",
-                analysis.process_id or analysis.slurm_job_id,
-                str(process_status)))
 
-        # set the analysis status of the sample in charon, recursing to libpreps and seqruns
-        report_analysis_status(analysis_sample, process_status)
-        # set the analysis results of the sample in charon if the process has finished successfully
-        report_analysis_results(analysis_sample, process_status)
+def update_charon_with_sample_local_job_status(analysis, analysis_instance, log):
+    # recreate a NGIProject object from the analysis
+    project_obj = project_from_analysis(analysis, analysis_instance)
+    # extract the sample object corresponding to the analysis entry
+    sample_obj = list(filter(lambda x: x.name == analysis.sample_id, project_obj)).pop()
+    analysis_sample = SarekAnalysisSample(project_obj, sample_obj, analysis_instance)
 
-        # remove the entry from the tracking database, but only if the process is not running
-        log.debug(
-            "{}removing from local tracking db".format(
-                "not " if process_status is ProcessRunning else ""))
-        remove_analysis(analysis, process_status, tracking_connector, force=False)
+    # get the analysis status
+    process_status = get_analysis_status(analysis, analysis_instance)
+    log.debug(
+        "{} with id {} has status {}".format(
+            "process" if analysis.process_id is not None else "job",
+            analysis.process_id or analysis.slurm_job_id,
+            str(process_status)))
+
+    # set the analysis status of the sample in charon, recursing to libpreps and seqruns
+    report_analysis_status(analysis_sample, process_status)
+    # set the analysis results of the sample in charon if the process has finished successfully
+    report_analysis_results(analysis_sample, process_status)
+
+    # remove the entry from the tracking database, but only if the process is not running
+    log.debug(
+        "{}removing from local tracking db".format(
+            "not " if process_status is ProcessRunning else ""))
+    remove_analysis(analysis, process_status, analysis_instance.tracking_connector, force=False)
 
 
 def _get_libpreps_and_seqruns(analysis_sample):
