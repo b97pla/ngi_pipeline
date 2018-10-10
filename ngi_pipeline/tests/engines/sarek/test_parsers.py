@@ -1,5 +1,6 @@
 import locale
 import mock
+import os
 import StringIO
 import tempfile
 import unittest
@@ -219,6 +220,9 @@ class TestPicardMarkDuplicatesParser(unittest.TestCase):
 
 class TestParserIntegrator(unittest.TestCase):
 
+    markdups_resultfile = None
+    qualimap_resultfile = None
+
     @classmethod
     def setUpClass(cls):
 
@@ -231,6 +235,11 @@ class TestParserIntegrator(unittest.TestCase):
         cls.qualimap_resultfile = _write_data(
             "\n".join([
                 "\n".join(rows) for rows in ExampleData.qualimap_input.values()]))
+
+    @classmethod
+    def tearDownClass(cls):
+        for f in [cls.markdups_resultfile, cls.qualimap_resultfile]:
+            os.unlink(f)
 
     def setUp(self):
         self.qualimap_parser = QualiMapParser(self.qualimap_resultfile)

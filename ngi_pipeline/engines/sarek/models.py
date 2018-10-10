@@ -6,7 +6,7 @@ from string import Template
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized, \
     SampleNotValidForAnalysisError
-from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser
+from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser, ParserIntegrator
 from ngi_pipeline.engines.sarek.process import ProcessConnector, ProcessRunning, ProcessExitStatusSuccessful, \
     ProcessExitStatusFailed
 from ngi_pipeline.utils.filesystem import safe_makedir, is_index_file
@@ -343,6 +343,9 @@ class SarekAnalysis(object):
     def generate_tsv_file_contents(self, analysis_sample):
         raise NotImplementedError("creation of sample tsv file contents should be implemented by subclasses")
 
+    def collect_analysis_metrics(self, analysis_sample):
+        raise NotImplementedError("collection of analysis results should be implemented by subclasses")
+
     def create_tsv_file(self, analysis_sample):
         """
         Create a tsv file containing the information needed by Sarek for starting the analysis. Will decide the path to
@@ -380,7 +383,7 @@ class SarekAnalysis(object):
 
     @classmethod
     def sample_analysis_path(cls, *args):
-        return cls._sample_paths(*args, subroot="ANALYSIS")
+        return os.path.join(cls._sample_paths(*args, subroot="ANALYSIS"), cls.__name__)
 
     @classmethod
     def _sample_analysis_file(cls, project_base_path, projectid, sampleid, extension):
@@ -491,6 +494,15 @@ class SarekGermlineAnalysis(SarekAnalysis):
             except IndexError:
                 pass
             yield fastqs_to_yield
+
+    def collect_analysis_metrics(self, analysis_sample):
+        results_parser = ParserIntegrator()
+        for processing_step in self.processing_steps(analysis_sample):
+            for parser_type, results_file in processing_step.report_files(analysis_sample):
+                results_parser.add_parser(parser_type(results_file))
+        return {
+            metric: results_parser.query_parsers("get_{}".format(metric)).pop()
+            for metric in ["percent_duplication", "autosomal_coverage", "total_reads"]}
 
 
 class SarekAnalysisSample:
@@ -769,7 +781,7 @@ class SarekPreprocessingStep(SarekWorkflowStep):
         return [
             [
                 QualiMapParser,
-                os.path.join(report_dir, "bamQC", "genome_results.txt")],
+                os.path.join(report_dir, "bamQC", analysis_sample.sampleid, "genome_results.txt")],
             [
                 PicardMarkDuplicatesParser,
                 os.path.join(report_dir, "MarkDuplicates", "{}.bam.metrics".format(analysis_sample.sampleid))]]

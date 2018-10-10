@@ -2,16 +2,21 @@ import mock
 import os
 import unittest
 
-from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.engines.sarek import local_process_tracking
 from ngi_pipeline.engines.sarek.database import TrackingConnector
-from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessStopped
+from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessStopped, ProcessExitStatusSuccessful, \
+    ProcessExitStatusUnknown
+from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
 
 @mock.patch("ngi_pipeline.engines.sarek.database.TrackingConnector", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.database.CharonConnector", autospec=True)
 class TestLocalProcessTracking(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.log = minimal_logger(__name__, debug=True)
 
     def test_remove_analysis(self, _, tracking_connector_mock):
         tracking_connector = tracking_connector_mock.return_value
@@ -74,3 +79,33 @@ class TestLocalProcessTracking(unittest.TestCase):
                             seqrun_obj.fastq_files))
         observed_project_obj = local_process_tracking._project_from_fastq_file_paths(fastq_files)
         self.assertEqual(expected_project_obj, observed_project_obj)
+
+    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis", autospec=True)
+    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysisSample", autospec=True)
+    def test_report_analysis_results(self, analysis_sample_mock, analysis_mock, charon_mock, tracking_mock):
+        # set up some mocks
+        expected_metrics = {
+            "percent_duplication": 25.3,
+            "autosomal_coverage": 35.8,
+            "total_reads": 123456789
+        }
+        analysis_mock.collect_analysis_metrics.return_value = expected_metrics
+        analysis_mock.charon_connector = charon_mock
+        analysis_sample_mock.sarek_analysis = analysis_mock
+        analysis_sample_mock.projectid = "this-is-a-projectid"
+        analysis_sample_mock.sampleid = "this-is-a-sampleid"
+
+        # if the exit status is not successful, results should not be reported
+        local_process_tracking.report_analysis_results(analysis_sample_mock, ProcessExitStatusUnknown, self.log)
+        analysis_mock.collect_analysis_metrics.assert_not_called()
+
+        # assert the expected setter methods are called
+        local_process_tracking.report_analysis_results(analysis_sample_mock, ProcessExitStatusSuccessful, self.log)
+        expected_setters = {"total_reads": charon_mock.set_sample_total_reads,
+                            "autosomal_coverage": charon_mock.set_sample_autosomal_coverage,
+                            "percent_duplication": charon_mock.set_sample_duplication}
+        for metric, setter in expected_setters.items():
+            setter.assert_called_once_with(
+                expected_metrics[metric],
+                analysis_sample_mock.projectid,
+                analysis_sample_mock.sampleid)

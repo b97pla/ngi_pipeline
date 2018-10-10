@@ -9,6 +9,7 @@ from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecogni
     SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekGermlineAnalysis, ReferenceGenome, \
     SarekWorkflowStep, SarekPreprocessingStep, SampleFastq, Runfolder, SarekAnalysisSample
+from ngi_pipeline.engines.sarek.parsers import ParserIntegrator
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
@@ -307,6 +308,29 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             observed_fastq_files = SarekGermlineAnalysis.fastq_files_from_tsv_file(fake_tsv_file)
             self.assertListEqual(sorted(expected_fastq_files), sorted(observed_fastq_files))
         os.unlink(fake_tsv_file)
+
+    def test_collect_analysis_metrics(
+            self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
+        sarek_analysis = self.get_instance(
+            process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
+        expected_metrics = {
+            "percent_duplication": 25.3,
+            "autosomal_coverage": 35.8,
+            "total_reads": 123456789
+        }
+
+        def _serve_metric(metric):
+            return expected_metrics[metric[4:]]
+
+        with mock.patch.object(
+                sarek_analysis, "processing_steps") as processing_steps, \
+                mock.patch(
+                    "ngi_pipeline.engines.sarek.models.ParserIntegrator", autospec=ParserIntegrator) as parser_mock:
+            processing_steps.return_value = []
+            parser_instance = parser_mock.return_value
+            query_mock = parser_instance.query_parsers
+            query_mock.side_effect = _serve_metric
+            self.assertDictEqual(expected_metrics, sarek_analysis.collect_analysis_metrics("this-is-a-sample-analysis"))
 
 
 class TestReferenceGenome(unittest.TestCase):

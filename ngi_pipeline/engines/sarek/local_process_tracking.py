@@ -66,9 +66,9 @@ def update_charon_with_sample_local_job_status(analysis, analysis_instance, log)
             str(process_status)))
 
     # set the analysis status of the sample in charon, recursing to libpreps and seqruns
-    report_analysis_status(analysis_sample, process_status)
+    report_analysis_status(analysis_sample, process_status, log)
     # set the analysis results of the sample in charon if the process has finished successfully
-    report_analysis_results(analysis_sample, process_status)
+    report_analysis_results(analysis_sample, process_status, log)
 
     # remove the entry from the tracking database, but only if the process is not running
     log.debug(
@@ -84,36 +84,48 @@ def _get_libpreps_and_seqruns(analysis_sample):
     return restrict_to_seqruns.keys(), restrict_to_seqruns
 
 
-def report_analysis_status(analysis_sample, process_status):
-
+def report_analysis_status(analysis_sample, process_status, log):
     # set the status in charon, recursing into libpreps and seqruns
     restrict_to_libpreps, restrict_to_seqruns = _get_libpreps_and_seqruns(analysis_sample)
-    charon_connector = analysis_sample.sarek_analysis.charon_connector
-    charon_connector.set_sample_analysis_status(
+    log.debug("setting analysis status in charon to match '{}' for '{}' - '{}' - '{}' - '{}'".format(
+        process_status,
         analysis_sample.projectid,
         analysis_sample.sampleid,
+        ",".join(restrict_to_libpreps),
+        ",".join(set([seqrun for seqruns in restrict_to_seqruns.values() for seqrun in seqruns]))
+    ))
+    charon_connector = analysis_sample.sarek_analysis.charon_connector
+    charon_connector.set_sample_analysis_status(
         charon_connector.analysis_status_from_process_status(process_status),
+        analysis_sample.projectid,
+        analysis_sample.sampleid,
         recurse=True,
         restrict_to_libpreps=restrict_to_libpreps,
         restrict_to_seqruns=restrict_to_seqruns)
 
 
-def report_analysis_results(analysis_sample, process_status):
+def report_analysis_results(analysis_sample, process_status, log):
     # only report the analysis results if the process exited successfully
-    if process_status == ProcessExitStatusSuccessful:
+    if process_status != ProcessExitStatusSuccessful:
         return
 
-    restrict_to_libpreps, restrict_to_seqruns = _get_libpreps_and_seqruns(analysis_sample)
-
-    # set the status in charon, recursing into libpreps and seqruns
-    charon_connector = analysis_sample.sarek_analysis.charon_connector
-    charon_connector.set_sample_analysis_status(
-        analysis_sample.projectid,
-        analysis_sample.sampleid,
-        charon_connector.analysis_status_from_process_status(process_status),
-        recurse=True,
-        restrict_to_libpreps=restrict_to_libpreps,
-        restrict_to_seqruns=restrict_to_seqruns)
+    analysis_metrics = analysis_sample.sarek_analysis.collect_analysis_metrics(analysis_sample)
+    log.debug("setting analysis metrics {} in charon for sample '{}' in project '{}'".format(
+        analysis_metrics, analysis_sample.sampleid, analysis_sample.projectid))
+    # for convenience, map the metrics to the corresponding setter in the charon_connector
+    for metric, setter in {
+        "total_reads": "set_sample_total_reads",
+        "autosomal_coverage": "set_sample_autosomal_coverage",
+        "percent_duplication": "set_sample_duplication"
+    }.items():
+        # set the status in charon, skip recursing into libpreps and seqruns
+        log.debug("setting {} to {} with {}".format(metric, analysis_metrics[metric], setter))
+        getattr(
+            analysis_sample.sarek_analysis.charon_connector,
+            setter)(
+            analysis_metrics[metric],
+            analysis_sample.projectid,
+            analysis_sample.sampleid)
 
 
 def _project_from_fastq_file_paths(fastq_file_paths):

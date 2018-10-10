@@ -4,7 +4,8 @@ import unittest
 from ngi_pipeline.engines.sarek.database import CharonConnector, CharonError, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotSpecifiedError, \
     SampleAnalysisStatusNotFoundError, SampleLookupError, AnalysisStatusForProcessStatusNotFoundError, \
-    AlignmentStatusForAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError
+    AlignmentStatusForAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError, SampleUpdateError, \
+    SeqrunUpdateError
 from ngi_pipeline.engines.sarek.process import ProcessStopped
 from ngi_pipeline.log.loggers import minimal_logger
 
@@ -131,34 +132,122 @@ class TestCharonConnector(unittest.TestCase):
                 lambda p: self.charon_connector.alignment_status_from_analysis_status(p),
                 CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS.keys()))
 
-    def test_set_sample_analysis_status(self, charon_session_mock):
+    def _configure_sample_attribute_update(self, charon_session_mock):
+        # set up some mocks
         self._get_charon_connector(charon_session_mock.return_value)
-        expected_return_value = "this-is-the-return-value"
-        self.charon_connector.charon_session.sample_update.return_value = expected_return_value
-        self.assertEqual(
-            expected_return_value,
-            self.charon_connector.set_sample_analysis_status(
-                self.project_id, self.sample_id, "this-is-the-analysis-status"))
-
-        self.charon_connector.charon_session.sample_update.side_effect = CharonError("raised CharonError")
-        with self.assertRaises(SampleAnalysisStatusNotSetError) as e:
-            self.charon_connector.set_sample_analysis_status(
-                self.project_id, self.sample_id, "this-is-the-analysis-status")
-
-        # set up for a recursive update
-        self.charon_connector.charon_session.sample_update.side_effect = None
         self.charon_connector.charon_session.sample_get_libpreps.return_value = {"libpreps": self.libpreps}
         self.charon_connector.charon_session.libprep_get_seqruns.return_value = {"seqruns": self.seqruns}
         expected_libpreps = self.libpreps[-1].values()
-        expected_seqruns = self.seqruns[1].values()
-        self.charon_connector.set_sample_analysis_status(
+        expected_seqruns = {lp.values()[0]: self.seqruns[1].values() for lp in self.libpreps}
+        return expected_libpreps, expected_seqruns
+
+    def test_set_sample_analysis_status(self, charon_session_mock):
+        expected_libpreps, expected_seqruns = self._configure_sample_attribute_update(charon_session_mock)
+
+        analysis_status = "FAILED"
+        alignment_status = self.charon_connector.alignment_status_from_analysis_status(analysis_status)
+        sample_update_kwargs = {"analysis_status": analysis_status}
+        seqrun_update_kwargs = {"alignment_status": alignment_status}
+
+        # set the analysis and alignment status for sample and seqrun, respectively
+        update_args = (analysis_status, self.project_id, self.sample_id)
+        update_kwargs = {
+            "recurse": True,
+            "restrict_to_libpreps": expected_libpreps,
+            "restrict_to_seqruns": expected_seqruns}
+        self.charon_connector.set_sample_analysis_status(*update_args, **update_kwargs)
+        self.charon_connector.charon_session.sample_update.assert_called_once_with(
+            self.project_id, self.sample_id, **sample_update_kwargs)
+        self.charon_connector.charon_session.seqrun_update.assert_called_once_with(
             self.project_id,
             self.sample_id,
-            CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS.keys()[0],
-            recurse=True,
-            restrict_to_libpreps=expected_libpreps,
-            restrict_to_seqruns={lp.values()[0]: expected_seqruns for lp in self.libpreps})
-        self.charon_connector.charon_session.seqrun_update.assert_called_once()
+            expected_libpreps[0],
+            expected_seqruns.values()[0][0],
+            **seqrun_update_kwargs)
+
+        # have exceptions raised
+        for update_fn in [self.charon_connector.charon_session.sample_update,
+                          self.charon_connector.charon_session.seqrun_update]:
+            update_fn.side_effect = CharonError("raised CharonError")
+            with self.assertRaises(SampleAnalysisStatusNotSetError):
+                self.charon_connector.set_sample_analysis_status(*update_args, **update_kwargs)
+            update_fn.side_effect = None
+
+    def test_set_sample_attribute(self, charon_session_mock):
+        expected_libpreps, expected_seqruns = self._configure_sample_attribute_update(charon_session_mock)
+        expected_return_value = "this-is-the-return-value"
+        self.charon_connector.charon_session.sample_update = mock.MagicMock()
+        self.charon_connector.charon_session.sample_update.return_value = expected_return_value
+
+        sample_update_kwargs = {"sample_attribute": "this-is-the-attribute-value"}
+        seqrun_update_kwargs = {"seqrun_attribute": "this-is-the-attribute-value"}
+        update_args = (self.project_id, self.sample_id)
+        update_kwargs = {
+            "recurse": False,
+            "sample_update_kwargs": sample_update_kwargs,
+            "seqrun_update_kwargs": seqrun_update_kwargs,
+            "restrict_to_libpreps": expected_libpreps,
+            "restrict_to_seqruns": expected_seqruns}
+        # update a sample attribute
+        observed_return_value = self.charon_connector.set_sample_attribute(*update_args, **update_kwargs)
+        self.assertEqual(
+            expected_return_value,
+            observed_return_value)
+        self.charon_connector.charon_session.seqrun_update.assert_not_called()
+        self.charon_connector.charon_session.sample_update.assert_called_once_with(
+            *update_args, **sample_update_kwargs)
+        self.charon_connector.charon_session.sample_update.reset_mock()
+
+        # update a sample attribute and seqrun recursively
+        update_kwargs["recurse"] = True
+        observed_return_value = self.charon_connector.set_sample_attribute(*update_args, **update_kwargs)
+        self.assertEqual(
+            expected_return_value,
+            observed_return_value)
+        self.charon_connector.charon_session.sample_update.assert_called_once_with(
+            *update_args, **sample_update_kwargs)
+        self.charon_connector.charon_session.seqrun_update.assert_called_once_with(
+            update_args[0],
+            update_args[1],
+            expected_libpreps[0],
+            expected_seqruns.values()[0][0],
+            **seqrun_update_kwargs)
+
+        # exception encountered during sample update
+        self.charon_connector.charon_session.sample_update.side_effect = CharonError("raised CharonError")
+        with self.assertRaises(SampleUpdateError):
+            self.charon_connector.set_sample_attribute(
+                self.project_id, self.sample_id, sample_update_kwargs=sample_update_kwargs)
+
+        # exception encountered during seqrun update
+        self.charon_connector.charon_session.seqrun_update.side_effect = CharonError("raised CharonError")
+        with self.assertRaises(SeqrunUpdateError):
+            self.charon_connector.set_sample_attribute(
+                self.project_id,
+                self.sample_id,
+                sample_update_kwargs=sample_update_kwargs,
+                seqrun_update_kwargs=seqrun_update_kwargs,
+                recurse=True)
+
+    def _set_metric_helper(self, charon_session_mock, update_fn, update_attribute, attribute_value):
+        self._configure_sample_attribute_update(charon_session_mock)
+        update_args = [self.project_id, self.sample_id]
+        getattr(self.charon_connector, update_fn)(attribute_value, *update_args)
+        self.charon_connector.charon_session.sample_update.assert_called_once_with(
+            *update_args,
+            **{update_attribute: attribute_value})
+
+    def test_set_sample_duplication(self, charon_session_mock):
+        self._set_metric_helper(
+            charon_session_mock, "set_sample_duplication", "duplication_pc", 12.45)
+
+    def test_set_sample_autosomal_coverage(self, charon_session_mock):
+        self._set_metric_helper(
+            charon_session_mock, "set_sample_autosomal_coverage", "total_autosomal_coverage", 30.9)
+
+    def test_set_sample_total_reads(self, charon_session_mock):
+        self._set_metric_helper(
+            charon_session_mock, "set_sample_total_reads", "total_sequenced_reads", 123456789)
 
 
 class TestTrackingConnector(unittest.TestCase):

@@ -6,7 +6,7 @@ from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessExitStatus
 from ngi_pipeline.engines.piper_ngi.database import get_db_session, SampleAnalysis
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotSpecifiedError, SampleLookupError, \
     AnalysisStatusForProcessStatusNotFoundError, SampleAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError, \
-    SampleAlignmentStatusNotSetError, AlignmentStatusForAnalysisStatusNotFoundError
+    AlignmentStatusForAnalysisStatusNotFoundError, SampleUpdateError, SeqrunUpdateError
 
 
 class CharonConnector:
@@ -83,7 +83,61 @@ class CharonConnector:
             raise sample_exception
 
     def set_sample_analysis_status(
-            self, projectid, sampleid, status, recurse=False, restrict_to_libpreps=None, restrict_to_seqruns=None):
+            self, status, *args, **kwargs):
+        """
+        Set the analysis status on a sample to the specified string. If recurse is True, the alignment status on
+        the affected seqruns will be set as well (to the string corresponding to the analysis status according to
+        the CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS mapping. Optionally, the libpreps and seqruns to
+        recurse into can be restricted.
+
+        :param projectid: the Charon projectid of the project to update
+        :param sampleid: the Charon sampleid of the sample to update
+        :param status: the analysis status to set as a string
+        :param recurse: if True, the seqruns belonging to the sample will also be updated with the corresponding
+        alignment status (default is False)
+        :param restrict_to_libpreps: list with libpreps to restrict the recursion to. If specified, only seqruns
+        belonging to libpreps in this list will be recursed into. Default is to iterate over seqruns in all libpreps
+        :param restrict_to_seqruns: dict with libprepids as keys and a list with seqrunids as values. If specified,
+        the seqruns to update for a libprepid will be restricted to the seqruns in the list. Default is to update
+        all seqruns for the libpreps iterated over
+        :return:
+        """
+        try:
+            return self.set_sample_attribute(
+                *args,
+                sample_update_kwargs={"analysis_status": status},
+                seqrun_update_kwargs={"alignment_status": self.alignment_status_from_analysis_status(status)},
+                **kwargs)
+        except (SampleUpdateError, SeqrunUpdateError) as e:
+            analysis_status_exception = SampleAnalysisStatusNotSetError(e.projectid, e.sampleid, status, reason=e)
+            self.log.error(analysis_status_exception)
+            raise analysis_status_exception
+
+    def set_sample_duplication(
+            self, pct_duplication, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"duplication_pc": pct_duplication}, **kwargs)
+
+    def set_sample_autosomal_coverage(
+            self, autosomal_coverage, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"total_autosomal_coverage": autosomal_coverage}, **kwargs)
+
+    def set_sample_total_reads(
+            self, total_reads, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"total_sequenced_reads": total_reads}, **kwargs)
+
+    def _set_sample_metric(self, *args, **kwargs):
+        try:
+            return self.set_sample_attribute(*args, **kwargs)
+        except SampleUpdateError as e:
+            self.log.error(e)
+            raise
+
+    def set_sample_attribute(
+            self, projectid, sampleid, sample_update_kwargs, seqrun_update_kwargs=None, recurse=False,
+            restrict_to_libpreps=None, restrict_to_seqruns=None):
         """
         Set the analysis status on a sample to the specified string. If recurse is True, the alignment status on
         the affected seqruns will be set as well (to the string corresponding to the analysis status according to
@@ -113,19 +167,20 @@ class CharonConnector:
                     for seqrun in self.libprep_seqruns(
                             projectid, sampleid, libprepid,
                             restrict_to=restrict_to_seqruns.get(libprepid) if restrict_to_seqruns else None):
-                        # set the alignment status on the seqrun according to the mapping
-                        self.set_seqrun_alignment_status(
-                            projectid,
-                            sampleid,
-                            libprepid,
-                            seqrun["seqrunid"],
-                            self.alignment_status_from_analysis_status(status))
+                        try:
+                            # set the alignment status on the seqrun according to the mapping
+                            self.charon_session.seqrun_update(
+                                projectid,
+                                sampleid,
+                                libprepid,
+                                seqrun["seqrunid"],
+                                **seqrun_update_kwargs)
+                        except CharonError as e:
+                            raise SeqrunUpdateError(projectid, sampleid, libprepid, seqrun["seqrunid"], reason=e)
             # lastly, update the analysis status of the sample
-            return self.charon_session.sample_update(projectid, sampleid, analysis_status=status)
+            return self.charon_session.sample_update(projectid, sampleid, **sample_update_kwargs)
         except CharonError as e:
-            analysis_status_exception = SampleAnalysisStatusNotSetError(projectid, sampleid, status, reason=e)
-            self.log.error(analysis_status_exception)
-            raise analysis_status_exception
+            raise SampleUpdateError(projectid, sampleid, reason=e)
 
     def sample_libpreps(self, projectid, sampleid, restrict_to=None):
         """
@@ -163,15 +218,6 @@ class CharonConnector:
             libprep_seqruns_exception = SampleLookupError(projectid, sampleid, reason=e)
             self.log.error(libprep_seqruns_exception)
             raise libprep_seqruns_exception
-
-    def set_seqrun_alignment_status(self, projectid, sampleid, libprepid, seqrunid, status):
-        try:
-            return self.charon_session.seqrun_update(projectid, sampleid, libprepid, seqrunid, alignment_status=status)
-        except CharonError as e:
-            alignment_status_exception = SampleAlignmentStatusNotSetError(
-                projectid, sampleid, libprepid, seqrunid, status, reason=e)
-            self.log.error(alignment_status_exception)
-            raise alignment_status_exception
 
     def analysis_status_from_process_status(self, process_status):
         try:
