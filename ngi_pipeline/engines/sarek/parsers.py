@@ -114,7 +114,7 @@ class QualiMapParser(ReportParser):
     def _parse_numeric_assignment(line):
         # identify key = value assignments with numeric values
         try:
-            key, value = re.search(r'^\s+([^=]+) = ([0-9,\.]+)', line).groups()
+            key, value = re.search(r'^\s+([^=]+) = ([0-9,.]+)', line).groups()
             value = locale.atof(value)
             key = key.strip()
             return {key: value}
@@ -140,7 +140,7 @@ class QualiMapParser(ReportParser):
     def _parse_cumulative_coverage(line):
         # identify cumulative coverage calculations
         try:
-            value, key = re.search(r'([0-9\.]+)%.*>= ([0-9]+X)', line).groups()
+            value, key = re.search(r'([0-9.]+)%.*>= ([0-9]+X)', line).groups()
             value = locale.atof(value)
             return {key: value}
         except AttributeError:
@@ -217,7 +217,7 @@ class PicardMarkDuplicatesParser(ReportParser):
         return raw_value
 
     def get_percent_duplication(self, library=None):
-        libraries = filter(lambda lib: library is None or lib["LIBRARY"] == library, self.data.get("metrics", []))
+        libraries = filter(lambda l: library is None or l["LIBRARY"] == library, self.data.get("metrics", []))
         total_reads = \
             sum([lib["UNPAIRED_READS_EXAMINED"] for lib in libraries]) + \
             2*sum([lib["READ_PAIRS_EXAMINED"] for lib in libraries])

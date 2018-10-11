@@ -2,7 +2,8 @@ import os
 
 from ngi_pipeline.conductor.classes import NGIProject
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
-from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekAnalysisSample
+from ngi_pipeline.engines.sarek.models.sarek import SarekAnalysis
+from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
 from ngi_pipeline.engines.sarek.process import JobStatus, ProcessStatus, ProcessRunning, ProcessExitStatusSuccessful
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.utils.classes import with_ngi_config
@@ -94,7 +95,7 @@ def report_analysis_status(analysis_sample, process_status, log):
         ",".join(restrict_to_libpreps),
         ",".join(set([seqrun for seqruns in restrict_to_seqruns.values() for seqrun in seqruns]))
     ))
-    charon_connector = analysis_sample.sarek_analysis.charon_connector
+    charon_connector = analysis_sample.analysis_object.charon_connector
     charon_connector.set_sample_analysis_status(
         charon_connector.analysis_status_from_process_status(process_status),
         analysis_sample.projectid,
@@ -109,7 +110,7 @@ def report_analysis_results(analysis_sample, process_status, log):
     if process_status != ProcessExitStatusSuccessful:
         return
 
-    analysis_metrics = analysis_sample.sarek_analysis.collect_analysis_metrics(analysis_sample)
+    analysis_metrics = analysis_sample.analysis_object.collect_analysis_metrics(analysis_sample)
     log.debug("setting analysis metrics {} in charon for sample '{}' in project '{}'".format(
         analysis_metrics, analysis_sample.sampleid, analysis_sample.projectid))
     # for convenience, map the metrics to the corresponding setter in the charon_connector
@@ -121,7 +122,7 @@ def report_analysis_results(analysis_sample, process_status, log):
         # set the status in charon, skip recursing into libpreps and seqruns
         log.debug("setting {} to {} with {}".format(metric, analysis_metrics[metric], setter))
         getattr(
-            analysis_sample.sarek_analysis.charon_connector,
+            analysis_sample.analysis_object.charon_connector,
             setter)(
             analysis_metrics[metric],
             analysis_sample.projectid,

@@ -222,7 +222,7 @@ class CharonConnector:
     def analysis_status_from_process_status(self, process_status):
         try:
             return self._ANALYSIS_STATUS_FROM_PROCESS_STATUS[process_status]
-        except KeyError as ke:
+        except KeyError:
             charon_status_error = AnalysisStatusForProcessStatusNotFoundError(process_status)
             self.log.error(charon_status_error)
             raise charon_status_error
@@ -230,7 +230,7 @@ class CharonConnector:
     def alignment_status_from_analysis_status(self, analysis_status):
         try:
             return self._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS[analysis_status]
-        except KeyError as ke:
+        except KeyError:
             status_error = AlignmentStatusForAnalysisStatusNotFoundError(analysis_status)
             self.log.error(status_error)
             raise status_error

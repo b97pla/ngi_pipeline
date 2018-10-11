@@ -31,7 +31,7 @@ class TestLocalProcessTracking(unittest.TestCase):
             "this-is-the-analysis", ProcessStopped, tracking_connector)
         tracking_connector.remove_analysis.assert_called_once()
 
-    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis", autospec=True)
+    @mock.patch("ngi_pipeline.engines.sarek.models.sarek.SarekAnalysis", autospec=True)
     def helper_analysis_status(self, process_mock, analysis, analysis_instance_mock):
         analysis.project_id = "this-is-a-project-id"
         analysis.sample_id = "this-is-a-sample-id"
@@ -80,8 +80,8 @@ class TestLocalProcessTracking(unittest.TestCase):
         observed_project_obj = local_process_tracking._project_from_fastq_file_paths(fastq_files)
         self.assertEqual(expected_project_obj, observed_project_obj)
 
-    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis", autospec=True)
-    @mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysisSample", autospec=True)
+    @mock.patch("ngi_pipeline.engines.sarek.models.sarek.SarekAnalysis", autospec=True)
+    @mock.patch("ngi_pipeline.engines.sarek.models.sarek.SarekAnalysisSample", autospec=True)
     def test_report_analysis_results(self, analysis_sample_mock, analysis_mock, charon_mock, tracking_mock):
         # set up some mocks
         expected_metrics = {
@@ -91,7 +91,7 @@ class TestLocalProcessTracking(unittest.TestCase):
         }
         analysis_mock.collect_analysis_metrics.return_value = expected_metrics
         analysis_mock.charon_connector = charon_mock
-        analysis_sample_mock.sarek_analysis = analysis_mock
+        analysis_sample_mock.analysis_object = analysis_mock
         analysis_sample_mock.projectid = "this-is-a-projectid"
         analysis_sample_mock.sampleid = "this-is-a-sampleid"
 
