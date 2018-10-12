@@ -39,6 +39,31 @@ class SampleFastq(object):
         match = re.match(self.FASTQ_REGEXP, filename)
         return match.groups() if match is not None else [None for i in range(5)]
 
+    @staticmethod
+    def sample_fastq_file_pair(sample_fastqs):
+        """
+        Take a list of SampleFastq objects and return a generator where each element is a list containing a fastq file
+        pair (if paired-end, for single-end the list will just contain one entry), with first element being R1 and
+        second element being R2.
+
+        :param sample_fastqs: a list of SampleFastq objects in any order
+        :return: a generator of lists of fastq file pairs
+        """
+        sorted_fastqs = sorted(sample_fastqs, key=lambda f: (f.sample_number, f.lane_number, f.read_number))
+        n = 0
+        while n < len(sorted_fastqs):
+            n += 1
+            if int(sorted_fastqs[n-1].read_number) > 1:
+                continue
+            fastqs_to_yield = [sorted_fastqs[n-1]]
+            try:
+                if int(sorted_fastqs[n].read_number) > 1:
+                    fastqs_to_yield.append(sorted_fastqs[n])
+                    n += 1
+            except IndexError:
+                pass
+            yield fastqs_to_yield
+
 
 class Runfolder(object):
     """

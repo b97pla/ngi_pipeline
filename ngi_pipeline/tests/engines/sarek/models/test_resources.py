@@ -42,6 +42,45 @@ class TestSampleFastq(unittest.TestCase):
         self.assertEqual(fastq_file_path, sample_fastq.dirname)
         self.assertEqual(fastq_file_name, sample_fastq.filename)
 
+    def test__sample_fastq_file_pair_sorting(self, *args):
+        sample_numbers = {
+            "S03": "sample_A",
+            "S1": "sample_A",
+            "S12": "sample_A",
+            "S2": "sample_A",
+            "S3": "sample_B"}
+        lane_numbers = ["2", "4", "5"]
+        sample_fastq_files = {
+            "1": [],
+            "2": []}
+        for sample_number in sorted(sample_numbers.keys()):
+            sample_name = sample_numbers[sample_number]
+            for lane_number in lane_numbers:
+                for read_number in sorted(sample_fastq_files.keys()):
+                    sample_fastq_files[read_number].append(
+                        SampleFastq("{}_{}_L00{}_R{}_001.fastq.gz".format(
+                            sample_name, sample_number, lane_number, read_number)))
+        n = 0
+        for fastq_pair in SampleFastq.sample_fastq_file_pair(
+                sample_fastq_files["1"] + sample_fastq_files["2"]):
+            for i in [0, 1]:
+                self.assertEqual(sample_fastq_files[sorted(sample_fastq_files.keys())[i]][n], fastq_pair[i])
+            n += 1
+
+    def test__sample_fastq_file_pair_single_read(self, *args):
+        sample_fastq_files = map(SampleFastq, [
+            "sample_A_S1_L001_R1_001.fastq.gz",
+            "sample_A_S1_L002_R1_001.fastq.gz",
+            "sample_A_S2_L001_R1_001.fastq.gz",
+            "sample_A_S2_L005_R1_001.fastq.gz",
+            "sample_B_S3_L002_R1_001.fastq.gz"
+        ])
+        n = 0
+        for fastq_pair in SampleFastq.sample_fastq_file_pair(sample_fastq_files):
+            self.assertEqual(1, len(fastq_pair))
+            self.assertEqual(sample_fastq_files[n], fastq_pair[0])
+            n += 1
+
 
 class TestRunfolder(unittest.TestCase):
 

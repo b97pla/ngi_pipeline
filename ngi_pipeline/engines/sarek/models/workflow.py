@@ -4,7 +4,7 @@ from string import Template
 from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser
 
 
-class SarekWorkflowStep:
+class SarekWorkflowStep(object):
     """
     The SarekWorkflowStep class represents an analysis step in the Sarek workflow. Primarily, it provides a method for
     creating the step-specific command line.
@@ -95,6 +95,13 @@ class SarekPreprocessingStep(SarekWorkflowStep):
 
     @classmethod
     def report_files(cls, analysis_sample):
+        """
+        Get a list of the report files resulting from this processing step and the associated parsers.
+
+        :param analysis_sample: the SarekAnalysisSample that was analyzed
+        :return: a list of tuples where the first element is a parser class instance and the second is the path to the
+        result file that the parser instance should parse
+        """
         report_dir = os.path.join(analysis_sample.sample_analysis_path(), "Reports")
         return [
             [

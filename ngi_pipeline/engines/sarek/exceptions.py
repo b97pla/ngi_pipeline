@@ -149,3 +149,12 @@ class ParserException(Exception):
             "{} raised an exception: {}".format(type(instance).__name__, message)
         )
         self.instance = instance
+
+
+class ParserMetricNotFoundException(ParserException):
+
+    def __init__(self, instance, metric):
+        super(ParserMetricNotFoundException, self).__init__(
+            instance,
+            "'{}' not retrieable by parser type".format(metric))
+        self.metric = metric

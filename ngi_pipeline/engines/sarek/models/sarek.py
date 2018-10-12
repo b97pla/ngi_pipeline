@@ -13,7 +13,7 @@ from ngi_pipeline.engines.sarek.process import ProcessConnector, ProcessRunning,
 from ngi_pipeline.utils.filesystem import safe_makedir
 
 
-class SarekAnalysis:
+class SarekAnalysis(object):
     """
     Base class for the SarekAnalysis engine. This class contains the necessary methods for configuring and launching
     an analysis with the Sarek engine. However, some methods are not implemented (they are "abstract") and are
@@ -350,11 +350,10 @@ class SarekAnalysis:
     def create_tsv_file(self, analysis_sample):
         """
         Create a tsv file containing the information needed by Sarek for starting the analysis. Will decide the path to
-        the tsv file based on the sample amd project information. If the path does not exist, it will be created.
+        the tsv file based on the sample information. If the path does not exist, it will be created.
 
         :raises: a SampleNotValidForAnalysisError if no libpreps or seqruns for the sample were eligible for analysis
-        :param sample_object: a NGISample object representing the sample to create the tsv file for
-        :param analysis_object: a NGIAnalysis object containing the details for the analysis
+        :param analysis_sample: a SarekAnalysisSample object representing the sample to create the tsv file for
         :return: the path to the created tsv file
         """
         rows = self.generate_tsv_file_contents(analysis_sample)
@@ -412,6 +411,12 @@ class SarekGermlineAnalysis(SarekAnalysis):
     """
 
     def processing_steps(self, analysis_sample):
+        """
+        Configure and get a list of the processing steps included in the analysis.
+
+        :param analysis_sample: the SarekAnalysisSample to analyze
+        :return: a list of the processing steps included in the analysis
+        """
         # get the path to the nextflow executable and the sarek main script. If not present in the config, rely on the
         # environment to be aware of them
         step_args = [
@@ -426,10 +431,10 @@ class SarekGermlineAnalysis(SarekAnalysis):
 
     def command_line(self, analysis_sample):
         """
-        Creates the command line for launching the sample analysis and returns it as a string.
+        Creates the command line for launching the sample analysis and returns it as a string. Works by chaining the
+        command line from each of the workflow steps in the analysis workflow.
 
-        :param sample_tsv_file: the path to the tsv file needed by Sarek for the analysis
-        :param sample_output_dir: the path to the folder where the sample analysis will be run
+        :param analysis_sample: the SarekAnalysisSample to analyze
         :return: the command line as a string
         """
         # each analysis step is represented by a SarekWorkflowStep instance
@@ -442,8 +447,7 @@ class SarekGermlineAnalysis(SarekAnalysis):
         Create the contents of the tsv file used by Sarek for the analysis. This will check the libpreps and seqruns
         and decide whether to include them in the analysis based on QC flag and alignment status, respectively.
 
-        :param sample_object: a NGISample object representing the sample to create the tsv contents for
-        :param analysis_object: a NGIAnalysis object containing the details for the analysis
+        :param analysis_sample: the SarekAnalysisSample to analyze
         :return: a list of lists representing tsv entries where the outer list is the rows and each element is a list of
         the fields that should be tab-separated in the tsv file
         """
@@ -471,37 +475,18 @@ class SarekGermlineAnalysis(SarekAnalysis):
                 fastq_files.extend(sample[5:])
         return fastq_files
 
-    @staticmethod
-    def sample_fastq_file_pair(sample_fastqs):
-        """
-        Take a list of SampleFastq objects and return a generator where each element is a list containing a fastq file
-        pair (if paired-end, for single-end the list will just contain one entry), with first element being R1 and
-        second element being R2.
-
-        :param sample_fastqs: a list of SampleFastq objects in any order
-        :return: a generator of lists of fastq file pairs
-        """
-        sorted_fastqs = sorted(sample_fastqs, key=lambda f: (f.sample_number, f.lane_number, f.read_number))
-        n = 0
-        while n < len(sorted_fastqs):
-            n += 1
-            if int(sorted_fastqs[n-1].read_number) > 1:
-                continue
-            fastqs_to_yield = [sorted_fastqs[n-1]]
-            try:
-                if int(sorted_fastqs[n].read_number) > 1:
-                    fastqs_to_yield.append(sorted_fastqs[n])
-                    n += 1
-            except IndexError:
-                pass
-            yield fastqs_to_yield
-
     def collect_analysis_metrics(self, analysis_sample):
+        """
+        Parse and return the analysis metrics from the finished analysis.
+
+        :param analysis_sample: the SarekAnalysisSample to analyze
+        :return: a dict with the analysis metric names as keys and a list of corresponding values for each metric
+        """
         results_parser = ParserIntegrator()
         for processing_step in self.processing_steps(analysis_sample):
             for parser_type, results_file in processing_step.report_files(analysis_sample):
                 results_parser.add_parser(parser_type(results_file))
         return {
-            metric: results_parser.query_parsers("get_{}".format(metric)).pop()
+            metric: results_parser.query_parsers("get_{}".format(metric))[0]
             for metric in ["percent_duplication", "autosomal_coverage", "total_reads"]}
 
