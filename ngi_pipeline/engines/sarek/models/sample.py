@@ -159,3 +159,17 @@ class SarekAnalysisSample(object):
             runid = "{}.{}.{}".format(
                 runfolder.flowcell_id, sample_fastq_file_pair[0].lane_number, sample_fastq_file_pair[0].sample_number)
             yield [runid] + map(lambda x: x.path, sample_fastq_file_pair)
+
+    def runid_and_fastq_files_from_csv(self):
+        """
+        Get an ordered representation of the fastq files belonging to this sample from the tsv file. Additionally,
+        the identifier constructed from FCID.LANE.SAMPLE_NUMBER is included.
+
+        The fastq files are returned according to the order in the tsv file.
+
+        :return: an iterator where each element is a list having the elements [identifier, fastq file R1,
+        fastq file R2 (if available)]
+        """
+        for runid_and_fastq_file_paths in self.analysis_object.runid_and_fastq_files_from_tsv_file(
+                self.sample_analysis_tsv_file()):
+            yield runid_and_fastq_file_paths

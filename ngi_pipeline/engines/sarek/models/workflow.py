@@ -1,6 +1,7 @@
 import os
 from string import Template
 
+from ngi_pipeline.engines.sarek.exceptions import ParserException
 from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser
 
 
@@ -103,13 +104,24 @@ class SarekPreprocessingStep(SarekWorkflowStep):
         result file that the parser instance should parse
         """
         report_dir = os.path.join(analysis_sample.sample_analysis_path(), "Reports")
+        # MarkDuplicates output files may be named differently depending on if the pipeline was started with a single
+        # fastq file pair or multiple file pairs
+        markdups_dir = os.path.join(report_dir, "MarkDuplicates")
+        metric_files = filter(lambda f: f.endswith(".metrics"), os.listdir(markdups_dir))
+        if not metric_files:
+            raise ParserException(cls, "no metrics file for MarkDuplicates found for sample {} in {}".format(
+                analysis_sample.sampleid, markdups_dir))
+        markdups_metrics_file = metric_files.pop()
+        if metric_files:
+            raise ParserException(cls, "multiple metrics files for MarkDuplicates found for sample {} in {}".format(
+                analysis_sample.sampleid, markdups_dir))
         return [
             [
                 QualiMapParser,
                 os.path.join(report_dir, "bamQC", analysis_sample.sampleid, "genome_results.txt")],
             [
                 PicardMarkDuplicatesParser,
-                os.path.join(report_dir, "MarkDuplicates", "{}.bam.metrics".format(analysis_sample.sampleid))]]
+                os.path.join(markdups_dir, markdups_metrics_file)]]
 
 
 class SarekGermlineVCStep(SarekWorkflowStep):

@@ -111,7 +111,10 @@ class AnalysisTracker(object):
         """
         tsv_file_path = analysis_instance.sample_analysis_tsv_file(
             self.analysis_entry.project_base_path, self.analysis_entry.project_id, self.analysis_entry.sample_id)
-        fastq_file_paths = analysis_instance.fastq_files_from_tsv_file(tsv_file_path)
+        runid_and_fastq_file_paths = analysis_instance.runid_and_fastq_files_from_tsv_file(tsv_file_path)
+        # fetch just the fastq file paths
+        fastq_file_paths = [
+            fastq_path for runid_and_paths in runid_and_fastq_file_paths for fastq_path in runid_and_paths[1:]]
         return self._project_from_fastq_file_paths(fastq_file_paths)
 
     @staticmethod

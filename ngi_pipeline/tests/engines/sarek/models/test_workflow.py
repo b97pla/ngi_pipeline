@@ -2,7 +2,9 @@ import mock
 import os
 import unittest
 
-from ngi_pipeline.engines.sarek.models.workflow import SarekWorkflowStep
+from ngi_pipeline.engines.sarek.exceptions import ParserException
+from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
+from ngi_pipeline.engines.sarek.models.workflow import SarekWorkflowStep, SarekPreprocessingStep
 
 
 class TestSarekWorkflowStep(unittest.TestCase):
@@ -82,3 +84,19 @@ class TestSarekWorkflowStep(unittest.TestCase):
         self.sarek_workflow_step.available_tools = ["B", "D"]
         self.assertListEqual(["B", "D"], self.sarek_workflow_step.valid_tools(["A", "B", "C", "D"]))
 
+
+class TestSarekPreprocessingStep(unittest.TestCase):
+
+    def test_report_files(self):
+        analysis_sample = mock.Mock(spec=SarekAnalysisSample)
+        analysis_sample.sampleid = "this-is-a-sample-id"
+        analysis_sample.sample_analysis_path.return_value = "this-is-a-path"
+        with mock.patch("os.listdir") as list_mock:
+            file_list = ["file1", "file2.extension", "file3.metrics", "file4.metrics"]
+            for listed_files in [file_list[0:2], file_list]:
+                list_mock.return_value = listed_files
+                with self.assertRaises(ParserException):
+                    SarekPreprocessingStep.report_files(analysis_sample)
+            list_mock.return_value = file_list[0:3]
+            self.assertEqual(
+                file_list[2], os.path.basename(SarekPreprocessingStep.report_files(analysis_sample)[1][1]))

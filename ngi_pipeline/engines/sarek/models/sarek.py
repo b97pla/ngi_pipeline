@@ -461,19 +461,18 @@ class SarekGermlineAnalysis(SarekAnalysis):
         return rows
 
     @staticmethod
-    def fastq_files_from_tsv_file(tsv_file):
+    def runid_and_fastq_files_from_tsv_file(tsv_file):
         """
-        Get the path to the fastq files listed in a tsv file
+        Get the identifier and path to the fastq files listed in a tsv file.
 
         :param tsv_file: the path to the tsv file
-        :return: a list of fastq file paths
+        :return: an iterator where each element is a list having the elements [identifier, fastq file R1,
+        fastq file R2 (if available)]
         """
-        fastq_files = []
         with open(tsv_file) as fh:
             reader = csv.reader(fh, dialect=csv.excel_tab)
             for sample in reader:
-                fastq_files.extend(sample[5:])
-        return fastq_files
+                yield sample[4:]
 
     def collect_analysis_metrics(self, analysis_sample):
         """

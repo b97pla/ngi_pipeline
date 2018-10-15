@@ -256,16 +256,23 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             for sample_obj in self.analysis_obj.project:
                 sarek_analysis.analyze_sample(sample_obj, self.analysis_obj)
 
-    def test_fastq_files_from_tsv_file(self, *args):
+    def test_runid_and_fastq_files_from_tsv_file(self, *args):
         fh, fake_tsv_file = tempfile.mkstemp(prefix="test_fastq_files_from_tsv_")
         with mock.patch("ngi_pipeline.engines.sarek.models.sarek.csv.reader", autospec=True) as csv_mock:
-            expected_fastq_files = [
-                os.path.join("/path", "to", "fastq", "file_{}.fastq.gz".format(i+1)) for i in range(4)]
+            expected_fastq_files = []
+            for row in range(3):
+                expected_fastq_files.append(
+                    ["id.for.row.{}".format(row)] + [
+                        os.path.join("/path", "to", "fastq", "file_{}-R{}.fastq.gz".format(row, i)) for i in [1, 2]])
+            for row in range(2):
+                expected_fastq_files.append(
+                    ["id.for.row.{}".format(row+3)] +
+                    [os.path.join("/path", "to", "fastq", "file_{}-R1.fastq.gz".format(row))])
             mocked_tsv_data = (
-                [1, 2, 3, 4, 5, expected_fastq_files[0], expected_fastq_files[1]],
-                [6, 7, 8, 9, 10, expected_fastq_files[2], expected_fastq_files[3]])
+                ["col1", "col2", "col3", "col4"] +
+                runid_and_fastq_files for runid_and_fastq_files in expected_fastq_files)
             csv_mock.return_value = mocked_tsv_data
-            observed_fastq_files = SarekGermlineAnalysis.fastq_files_from_tsv_file(fake_tsv_file)
+            observed_fastq_files = list(SarekGermlineAnalysis.runid_and_fastq_files_from_tsv_file(fake_tsv_file))
             self.assertListEqual(sorted(expected_fastq_files), sorted(observed_fastq_files))
         os.unlink(fake_tsv_file)
 
