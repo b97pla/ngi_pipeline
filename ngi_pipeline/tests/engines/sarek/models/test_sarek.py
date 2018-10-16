@@ -5,15 +5,15 @@ import tempfile
 import unittest
 
 from ngi_pipeline.engines.sarek.database import CharonConnector
-from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, ReferenceGenomeNotRecognized, \
-    SampleNotValidForAnalysisError
-from ngi_pipeline.engines.sarek.models import SarekAnalysis, SarekGermlineAnalysis, ReferenceGenome, \
-    SarekWorkflowStep, SarekPreprocessingStep, SampleFastq, Runfolder
+from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, SampleNotValidForAnalysisError
+from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
+from ngi_pipeline.engines.sarek.models.sarek import SarekAnalysis, SarekGermlineAnalysis
+from ngi_pipeline.engines.sarek.parsers import ParserIntegrator
 from ngi_pipeline.log.loggers import minimal_logger
 from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 
 
-@mock.patch("ngi_pipeline.engines.sarek.models.ReferenceGenome", autospec=True)
+@mock.patch("ngi_pipeline.engines.sarek.models.sarek.ReferenceGenome", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.database.CharonConnector", autospec=True)
 class TestSarekAnalysis(unittest.TestCase):
 
@@ -22,6 +22,7 @@ class TestSarekAnalysis(unittest.TestCase):
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
         self.config = TestSarekAnalysis.CONFIG
+        self.analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
 
     def test_get_analysis_instance_for_project_germline(self, charon_connector_mock, reference_genome_mock):
         reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
@@ -33,7 +34,7 @@ class TestSarekAnalysis(unittest.TestCase):
             self.config,
             self.log,
             charon_connector=charon_connector)
-        self.assertEqual(expected_analysis_class, type(observed_analysis_instance))
+        self.assertIsInstance(observed_analysis_instance, expected_analysis_class)
 
     def test_get_analysis_instance_for_project_somatic(self, charon_connector_mock, reference_genome_mock):
         reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
@@ -132,7 +133,7 @@ class TestSarekAnalysis(unittest.TestCase):
             charon_connector=charon_connector_mock.return_value)
 
         with self.assertRaises(NotImplementedError):
-            sarek_analysis.command_line(None, None)
+            sarek_analysis.command_line(None)
 
     def test_generate_tsv_file_contents(self, charon_connector_mock, reference_genome_mock):
 
@@ -143,7 +144,7 @@ class TestSarekAnalysis(unittest.TestCase):
             charon_connector=charon_connector_mock.return_value)
 
         with self.assertRaises(NotImplementedError):
-            sarek_analysis.generate_tsv_file_contents(None, None)
+            sarek_analysis.generate_tsv_file_contents(None)
 
     def test_create_tsv_file(self, charon_connector_mock, reference_genome_mock):
         sarek_analysis = SarekAnalysis(
@@ -151,21 +152,22 @@ class TestSarekAnalysis(unittest.TestCase):
             self.config,
             self.log,
             charon_connector=charon_connector_mock.return_value)
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
         with mock.patch.object(sarek_analysis, "generate_tsv_file_contents") as tsv_mock, \
-                mock.patch.object(sarek_analysis, "sample_analysis_tsv_file") as tsv_path_mock:
+                mock.patch.object(analysis_sample, "sample_analysis_tsv_file") as tsv_path_mock:
             tsv_mock.return_value = []
-            analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
             with self.assertRaises(SampleNotValidForAnalysisError) as e:
-                sarek_analysis.create_tsv_file(analysis_obj.project.samples.values()[0], analysis_obj)
+                sarek_analysis.create_tsv_file(analysis_sample)
             tsv_mock.return_value = [["this", "is"], ["some", "content"]]
             tempdir = tempfile.mkdtemp(prefix="test_create_tsv_file_")
             tsv_path_mock.return_value = os.path.join(tempdir, "tsv_parent_folder", "tsv_file.tsv")
-            sarek_analysis.create_tsv_file(analysis_obj.project.samples.values()[0], analysis_obj)
+            sarek_analysis.create_tsv_file(analysis_sample)
             self.assertTrue(os.path.exists(tsv_path_mock.return_value))
             shutil.rmtree(tempdir)
 
 
-@mock.patch("ngi_pipeline.engines.sarek.models.ReferenceGenome", autospec=True)
+@mock.patch("ngi_pipeline.engines.sarek.models.resources.ReferenceGenome", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.database.CharonConnector", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.database.TrackingConnector", autospec=True)
 @mock.patch("ngi_pipeline.engines.sarek.process.ProcessConnector", autospec=True)
@@ -181,6 +183,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
         self.config = TestSarekGermlineAnalysis.CONFIG
+        self.analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
 
     def get_instance(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
@@ -198,9 +201,11 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
-        self.config["sample"] = "/path/to/sample-tsv-definition-file"
-        self.config["outDir"] = "/path/to/analysis/output"
-        observed_cmd = sarek_analysis.command_line(self.config["sample"], self.config["outDir"])
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
+        self.config["outDir"] = analysis_sample.sample_analysis_path()
+        self.config["sample"] = analysis_sample.sample_analysis_tsv_file()
+        observed_cmd = sarek_analysis.command_line(analysis_sample)
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
         self.assertIn("--tools {}".format(",".join(self.config["tools"])), observed_cmd)
@@ -212,10 +217,9 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
-        analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
-        sample_obj = analysis_obj.project.samples.values()[0]
-        sample_data_path = SarekAnalysis.sample_data_path(
-            analysis_obj.project.base_path, analysis_obj.project.name, sample_obj.name)
+        sample_obj = self.analysis_obj.project.samples.values()[0]
+        analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
+        sample_data_path = analysis_sample.sample_data_path()
         with mock.patch.object(
                 sarek_analysis, "libprep_should_be_started") as libprep_mock, \
                 mock.patch.object(
@@ -225,8 +229,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
                 seqrun_mock.return_value = not start_mode
                 self.assertListEqual(
                     [],
-                    sarek_analysis.generate_tsv_file_contents(
-                        sample_obj, analysis_obj))
+                    sarek_analysis.generate_tsv_file_contents(analysis_sample))
             libprep_mock.return_value = True
             seqrun_mock.return_value = True
             expected_tsv = []
@@ -241,207 +244,59 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
                             '{}_S{}_L001_R{}_001.fastq.gz'.format(
                                 libprepid, sample_index, read_num)) for read_num in ['1', '2']])
                     expected_tsv.append(tsv_row)
-            observed_tsv = sarek_analysis.generate_tsv_file_contents(
-                sample_obj, analysis_obj)
+            observed_tsv = sarek_analysis.generate_tsv_file_contents(analysis_sample)
             self.assertListEqual(sorted(expected_tsv), sorted(observed_tsv))
-
-    def test__sample_fastq_file_pair_sorting(self, *args):
-        sample_numbers = {
-            "S03": "sample_A",
-            "S1": "sample_A",
-            "S12": "sample_A",
-            "S2": "sample_A",
-            "S3": "sample_B"}
-        lane_numbers = ["2", "4", "5"]
-        sample_fastq_files = {
-            "1": [],
-            "2": []}
-        for sample_number in sorted(sample_numbers.keys()):
-            sample_name = sample_numbers[sample_number]
-            for lane_number in lane_numbers:
-                for read_number in sorted(sample_fastq_files.keys()):
-                    sample_fastq_files[read_number].append(
-                        SampleFastq("{}_{}_L00{}_R{}_001.fastq.gz".format(
-                            sample_name, sample_number, lane_number, read_number)))
-        n = 0
-        for fastq_pair in SarekGermlineAnalysis._sample_fastq_file_pair(
-                sample_fastq_files["1"] + sample_fastq_files["2"]):
-            for i in [0, 1]:
-                self.assertEqual(sample_fastq_files[sorted(sample_fastq_files.keys())[i]][n], fastq_pair[i])
-            n += 1
-
-    def test__sample_fastq_file_pair_single_read(self, *args):
-        sample_fastq_files = map(SampleFastq, [
-            "sample_A_S1_L001_R1_001.fastq.gz",
-            "sample_A_S1_L002_R1_001.fastq.gz",
-            "sample_A_S2_L001_R1_001.fastq.gz",
-            "sample_A_S2_L005_R1_001.fastq.gz",
-            "sample_B_S3_L002_R1_001.fastq.gz"
-        ])
-        n = 0
-        for fastq_pair in SarekGermlineAnalysis._sample_fastq_file_pair(sample_fastq_files):
-            self.assertEqual(1, len(fastq_pair))
-            self.assertEqual(sample_fastq_files[n], fastq_pair[0])
-            n += 1
 
     def test_analyze_sample(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
-        analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
         sarek_analysis = self.get_instance(
             process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
         with mock.patch.object(
                 sarek_analysis, "create_tsv_file", return_value=os.path.join("/path", "to", "tsv", "file")) as tsv_mock:
-            for sample_obj in analysis_obj.project:
-                sarek_analysis.analyze_sample(sample_obj, analysis_obj)
+            for sample_obj in self.analysis_obj.project:
+                sarek_analysis.analyze_sample(sample_obj, self.analysis_obj)
 
-    def test_fastq_files_from_tsv_file(self, *args):
+    def test_runid_and_fastq_files_from_tsv_file(self, *args):
         fh, fake_tsv_file = tempfile.mkstemp(prefix="test_fastq_files_from_tsv_")
-        with mock.patch("ngi_pipeline.engines.sarek.models.csv.reader", autospec=True) as csv_mock:
-            expected_fastq_files = [
-                os.path.join("/path", "to", "fastq", "file_{}.fastq.gz".format(i+1)) for i in range(4)]
+        with mock.patch("ngi_pipeline.engines.sarek.models.sarek.csv.reader", autospec=True) as csv_mock:
+            expected_fastq_files = []
+            for row in range(3):
+                expected_fastq_files.append(
+                    ["id.for.row.{}".format(row)] + [
+                        os.path.join("/path", "to", "fastq", "file_{}-R{}.fastq.gz".format(row, i)) for i in [1, 2]])
+            for row in range(2):
+                expected_fastq_files.append(
+                    ["id.for.row.{}".format(row+3)] +
+                    [os.path.join("/path", "to", "fastq", "file_{}-R1.fastq.gz".format(row))])
             mocked_tsv_data = (
-                [1, 2, 3, 4, 5, expected_fastq_files[0], expected_fastq_files[1]],
-                [6, 7, 8, 9, 10, expected_fastq_files[2], expected_fastq_files[3]])
+                ["col1", "col2", "col3", "col4"] +
+                runid_and_fastq_files for runid_and_fastq_files in expected_fastq_files)
             csv_mock.return_value = mocked_tsv_data
-            observed_fastq_files = SarekGermlineAnalysis.fastq_files_from_tsv_file(fake_tsv_file)
+            observed_fastq_files = list(SarekGermlineAnalysis.runid_and_fastq_files_from_tsv_file(fake_tsv_file))
             self.assertListEqual(sorted(expected_fastq_files), sorted(observed_fastq_files))
         os.unlink(fake_tsv_file)
 
+    def test_collect_analysis_metrics(
+            self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
+        sarek_analysis = self.get_instance(
+            process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock)
+        expected_metrics = {
+            "percent_duplication": [25.3],
+            "autosomal_coverage": [35.8],
+            "total_reads": [123456789]
+        }
 
-class TestReferenceGenome(unittest.TestCase):
+        def _serve_metric(metric):
+            return expected_metrics[metric[4:]]
 
-    def test_get_instance(self):
-        self.assertEqual("GRCh37", str(ReferenceGenome.get_instance("GRCh37")))
-        self.assertEqual("GRCh38", str(ReferenceGenome.get_instance("GRCh38")))
-        with self.assertRaises(ReferenceGenomeNotRecognized):
-            ReferenceGenome.get_instance("unknown")
-
-
-class TestSarekWorkflowStep(unittest.TestCase):
-
-    def setUp(self):
-        self.sarek_args = TestSarekGermlineAnalysis.CONFIG.copy()
-        self.sarek_workflow_step = SarekWorkflowStep(
-            self.sarek_args["nf_path"], self.sarek_args["sarek_path"], **self.sarek_args)
-
-    def test__append_argument(self):
-        base_string = "this-is-the-base-string"
-
-        # test a non-existing attribute
-        attribute = "this-attribute-does-not-exist"
-        self.assertEqual(base_string, self.sarek_workflow_step._append_argument(base_string, attribute))
-
-        # test a None attribute
-        attribute = "none_attribute"
-        setattr(self.sarek_workflow_step, attribute, None)
-        self.assertEqual(base_string, self.sarek_workflow_step._append_argument(base_string, attribute))
-
-        # test a list attribute
-        attribute = "list_attribute"
-        value = ["this", "is", "a", "list"]
-        self.sarek_workflow_step.sarek_args[attribute] = value
-        expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
-        self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
-
-        # test a string attribute
-        attribute = "string_attribute"
-        value = "this-is-a-string"
-        self.sarek_workflow_step.sarek_args[attribute] = value
-        expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
-        self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
-
-        # test a custom hyphen string
-        hyphen = "xyz"
-        expected_result = "{0} {2}{1} ${{{1}}}".format(base_string, attribute, hyphen)
-        self.assertEqual(
-            expected_result, self.sarek_workflow_step._append_argument(
-                base_string, attribute, hyphen=hyphen))
-
-    def test_sarek_step(self):
-        with self.assertRaises(NotImplementedError):
-            self.sarek_workflow_step.sarek_step()
-
-    def test_command_line(self):
-        sarek_step = "sarek_step"
-        sarek_workflow_step = SarekWorkflowStep(self.sarek_args["nf_path"], self.sarek_args["sarek_path"])
-        with mock.patch.object(sarek_workflow_step, "sarek_step", return_value=sarek_step) as sarek_step_mock:
-            expected_command_line = "{} run {}".format(
-                self.sarek_args["nf_path"],
-                os.path.join(self.sarek_args["sarek_path"], sarek_step))
-            self.assertEqual(expected_command_line, sarek_workflow_step.command_line())
-            sarek_step_mock.assert_called_once()
-
-    def test_command_line_args(self):
-        sarek_step = "sarek_step"
-        valid_tools = self.sarek_args["tools"]
-        with mock.patch.object(self.sarek_workflow_step, "sarek_step", return_value=sarek_step):
-            observed_command_line = self.sarek_workflow_step.command_line()
-            self.assertNotIn("--tools", observed_command_line)
-            for key, value in self.sarek_args.items():
-                if key not in ["tools", "sarek_path", "nf_path"]:
-                    self.assertIn("-{} {}".format(key, value), observed_command_line)
-
-    def test_valid_tools(self):
-        self.sarek_workflow_step.available_tools = []
-        self.assertListEqual([], self.sarek_workflow_step.valid_tools(["A", "B", "C", "D"]))
-        self.sarek_workflow_step.available_tools = ["B", "D"]
-        self.assertListEqual(["B", "D"], self.sarek_workflow_step.valid_tools(["A", "B", "C", "D"]))
-
-
-class TestSampleFastq(unittest.TestCase):
-
-    def setUp(self):
-        self.sample_name = "AB-0123_Sample-456"
-        self.sample_number = "S2"
-        self.lane_number = "3"
-        self.read_number = "2"
-        self.file_extension = ".fastq.gz"
-
-    def get_file_name(self):
-        return "_".join([
-            self.sample_name,
-            self.sample_number,
-            "L00{}".format(self.lane_number),
-            "R{}".format(self.read_number),
-            "001{}".format(self.file_extension)])
-
-    def test_split_filename(self):
-        fastq_file_name = self.get_file_name()
-        fastq_file_path = os.path.join("/path", "to")
-        sample_fastq = SampleFastq(os.path.join(fastq_file_path, fastq_file_name))
-        self.assertEqual(self.sample_name, sample_fastq.sample_name)
-        self.assertEqual(self.sample_number, sample_fastq.sample_number)
-        self.assertEqual(self.lane_number, sample_fastq.lane_number)
-        self.assertEqual(self.read_number, sample_fastq.read_number)
-        self.assertEqual(fastq_file_path, sample_fastq.dirname)
-        self.assertEqual(fastq_file_name, sample_fastq.filename)
-
-
-class TestRunfolder(unittest.TestCase):
-
-    def setUp(self):
-        self.run_date = "180406"
-        self.instrument_id = "ST-01234"
-        self.run_number = "0123"
-        self.flowcell_position = "A"
-        self.flowcell_id = "ABC123CXY"
-
-    def get_runfolder_name(self):
-        return "_".join([
-            self.run_date,
-            self.instrument_id,
-            self.run_number,
-            "{}{}".format(self.flowcell_position, self.flowcell_id)])
-
-    def test_split_runfolder_name(self):
-        runfolder_path = os.path.join("/path", "to")
-        runfolder_name = self.get_runfolder_name()
-        runfolder = Runfolder(os.path.join(runfolder_path, runfolder_name))
-        self.assertEqual(runfolder_path, runfolder.dirname)
-        self.assertEqual(runfolder_name, runfolder.runfolder_name)
-        self.assertEqual(self.run_date, runfolder.run_date)
-        self.assertEqual(self.instrument_id, runfolder.instrument_id)
-        self.assertEqual(self.run_number, runfolder.run_number)
-        self.assertEqual(self.flowcell_position, runfolder.flowcell_position)
-        self.assertEqual(self.flowcell_id, runfolder.flowcell_id)
-
+        with mock.patch.object(
+                sarek_analysis, "processing_steps") as processing_steps, \
+                mock.patch(
+                    "ngi_pipeline.engines.sarek.models.sarek.ParserIntegrator", autospec=ParserIntegrator) as \
+                        parser_mock:
+            processing_steps.return_value = []
+            parser_instance = parser_mock.return_value
+            query_mock = parser_instance.query_parsers
+            query_mock.side_effect = _serve_metric
+            observed_metrics = sarek_analysis.collect_analysis_metrics("this-is-a-sample-analysis")
+            self.assertDictEqual({metric: value[0] for metric, value in expected_metrics.items()}, observed_metrics)

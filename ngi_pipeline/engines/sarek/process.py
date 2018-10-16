@@ -41,7 +41,7 @@ class ProcessConnector(object):
             try:
                 proc = execute_command_line(command_line, shell=False, cwd=working_dir)
                 return proc.pid
-            except RuntimeError as re:
+            except RuntimeError:
                 raise
 
 
@@ -134,7 +134,7 @@ class ProcessExitStatus(ProcessStatus):
         except IOError as e:
             if e.errno != errno.ENOENT:
                 raise
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             pass
         return None
 

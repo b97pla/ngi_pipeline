@@ -65,5 +65,5 @@ class TestLaunchers(unittest.TestCase):
         self.analysis_object = TestLaunchers.get_NGIAnalysis(config=self.config, log=self.log)
 
     def test_analyze(self):
-        with mock.patch("ngi_pipeline.engines.sarek.models.SarekAnalysis", autospec=True) as SarekAnalysisMock:
+        with mock.patch("ngi_pipeline.engines.sarek.models.sarek.SarekAnalysis", autospec=True) as SarekAnalysisMock:
             pass

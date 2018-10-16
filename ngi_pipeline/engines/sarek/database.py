@@ -6,10 +6,10 @@ from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessExitStatus
 from ngi_pipeline.engines.piper_ngi.database import get_db_session, SampleAnalysis
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotSpecifiedError, SampleLookupError, \
     AnalysisStatusForProcessStatusNotFoundError, SampleAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError, \
-    SampleAlignmentStatusNotSetError, AlignmentStatusForAnalysisStatusNotFoundError
+    AlignmentStatusForAnalysisStatusNotFoundError, SampleUpdateError, SeqrunUpdateError
 
 
-class CharonConnector:
+class CharonConnector(object):
     """
     The CharonConnector class provides an interface to the Charon database. Underneath, it uses the
     ngi_pipeline.database.classes.CharonSession class. Connection credentials are picked up from environment variables.
@@ -83,24 +83,72 @@ class CharonConnector:
             raise sample_exception
 
     def set_sample_analysis_status(
-            self, projectid, sampleid, status, recurse=False, restrict_to_libpreps=None, restrict_to_seqruns=None):
+            self, status, *args, **kwargs):
         """
         Set the analysis status on a sample to the specified string. If recurse is True, the alignment status on
         the affected seqruns will be set as well (to the string corresponding to the analysis status according to
-        the CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS mapping. Optionally, the libpreps and seqruns to
+        the CharonConnector._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS mapping. See `set_sample_attribute` for restricting
+        recursion.
+
+        :param status: the analysis status to set as a string
+        :param args: additional arguments that will be passed to `set_sample_attribute`
+        :param kwargs: additional keyword arguments that will be passed to `set_sample_attribute`
+        :return: a response object
+        """
+        try:
+            kwargs["sample_update_kwargs"] = {"analysis_status": status}
+            kwargs["seqrun_update_kwargs"] = {"alignment_status": self.alignment_status_from_analysis_status(status)}
+            return self.set_sample_attribute(
+                *args,
+                **kwargs)
+        except (SampleUpdateError, SeqrunUpdateError) as e:
+            analysis_status_exception = SampleAnalysisStatusNotSetError(e.projectid, e.sampleid, status, reason=e)
+            self.log.error(analysis_status_exception)
+            raise analysis_status_exception
+
+    def set_sample_duplication(
+            self, pct_duplication, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"duplication_pc": pct_duplication}, **kwargs)
+
+    def set_sample_autosomal_coverage(
+            self, autosomal_coverage, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"total_autosomal_coverage": autosomal_coverage}, **kwargs)
+
+    def set_sample_total_reads(
+            self, total_reads, *args, **kwargs):
+        return self._set_sample_metric(
+            *args, sample_update_kwargs={"total_sequenced_reads": total_reads}, **kwargs)
+
+    def _set_sample_metric(self, *args, **kwargs):
+        try:
+            return self.set_sample_attribute(*args, **kwargs)
+        except SampleUpdateError as e:
+            self.log.error(e)
+            raise
+
+    def set_sample_attribute(
+            self, projectid, sampleid, sample_update_kwargs, seqrun_update_kwargs=None, recurse=False,
+            restrict_to_libpreps=None, restrict_to_seqruns=None):
+        """
+        Update a sample according to the `sample_update_kwargs` dict. If recurse is True, the affected seqruns will be
+        updated according to the `seqrun_update_kwargs` dict as well. Optionally, the libpreps and seqruns to
         recurse into can be restricted.
 
         :param projectid: the Charon projectid of the project to update
         :param sampleid: the Charon sampleid of the sample to update
-        :param status: the analysis status to set as a string
-        :param recurse: if True, the seqruns belonging to the sample will also be updated with the corresponding
-        alignment status (default is False)
+        :param sample_update_kwargs: a dict to pass as keyword arguments to the
+        `ngi_pipeline.database.classes.CharonSession.sample_update` method
+        :param seqrun_update_kwargs: a dict to pass as keyword arguments to the
+        `ngi_pipeline.database.classes.CharonSession.seqrun_update` method
+        :param recurse: if True, the seqruns belonging to the sample will also be updated (default is False)
         :param restrict_to_libpreps: list with libpreps to restrict the recursion to. If specified, only seqruns
         belonging to libpreps in this list will be recursed into. Default is to iterate over seqruns in all libpreps
         :param restrict_to_seqruns: dict with libprepids as keys and a list with seqrunids as values. If specified,
         the seqruns to update for a libprepid will be restricted to the seqruns in the list. Default is to update
         all seqruns for the libpreps iterated over
-        :return:
+        :return: a response object
         """
         try:
             if recurse:
@@ -113,19 +161,20 @@ class CharonConnector:
                     for seqrun in self.libprep_seqruns(
                             projectid, sampleid, libprepid,
                             restrict_to=restrict_to_seqruns.get(libprepid) if restrict_to_seqruns else None):
-                        # set the alignment status on the seqrun according to the mapping
-                        self.set_seqrun_alignment_status(
-                            projectid,
-                            sampleid,
-                            libprepid,
-                            seqrun["seqrunid"],
-                            self.alignment_status_from_analysis_status(status))
+                        try:
+                            # set the alignment status on the seqrun according to the mapping
+                            self.charon_session.seqrun_update(
+                                projectid,
+                                sampleid,
+                                libprepid,
+                                seqrun["seqrunid"],
+                                **seqrun_update_kwargs)
+                        except CharonError as e:
+                            raise SeqrunUpdateError(projectid, sampleid, libprepid, seqrun["seqrunid"], reason=e)
             # lastly, update the analysis status of the sample
-            return self.charon_session.sample_update(projectid, sampleid, analysis_status=status)
+            return self.charon_session.sample_update(projectid, sampleid, **sample_update_kwargs)
         except CharonError as e:
-            analysis_status_exception = SampleAnalysisStatusNotSetError(projectid, sampleid, status, reason=e)
-            self.log.error(analysis_status_exception)
-            raise analysis_status_exception
+            raise SampleUpdateError(projectid, sampleid, reason=e)
 
     def sample_libpreps(self, projectid, sampleid, restrict_to=None):
         """
@@ -164,33 +213,39 @@ class CharonConnector:
             self.log.error(libprep_seqruns_exception)
             raise libprep_seqruns_exception
 
-    def set_seqrun_alignment_status(self, projectid, sampleid, libprepid, seqrunid, status):
-        try:
-            return self.charon_session.seqrun_update(projectid, sampleid, libprepid, seqrunid, alignment_status=status)
-        except CharonError as e:
-            alignment_status_exception = SampleAlignmentStatusNotSetError(
-                projectid, sampleid, libprepid, seqrunid, status, reason=e)
-            self.log.error(alignment_status_exception)
-            raise alignment_status_exception
-
     def analysis_status_from_process_status(self, process_status):
+        """
+        Translate a ProcessStatus to the corresponding status string used for the analysis status in Charon
+
+        :param process_status: the process status class to translate
+        :return: the corresponding string used in Charon
+        :raises: AnalysisStatusForProcessStatusNotFoundError if the process status could not be translated
+        """
         try:
             return self._ANALYSIS_STATUS_FROM_PROCESS_STATUS[process_status]
-        except KeyError as ke:
+        except KeyError:
             charon_status_error = AnalysisStatusForProcessStatusNotFoundError(process_status)
             self.log.error(charon_status_error)
             raise charon_status_error
 
     def alignment_status_from_analysis_status(self, analysis_status):
+        """
+        Translate a sample analysis status used in Charon to the corresponding alignment status string used for
+        seqruns in Charon
+
+        :param analysis_status: the analysis status string to translate
+        :return: the corresponding alignment status string used in Charon
+        :raises: AlignmentStatusForAnalysisStatusNotFoundError if the process status could not be translated
+        """
         try:
             return self._ALIGNMENT_STATUS_FROM_ANALYSIS_STATUS[analysis_status]
-        except KeyError as ke:
+        except KeyError:
             status_error = AlignmentStatusForAnalysisStatusNotFoundError(analysis_status)
             self.log.error(status_error)
             raise status_error
 
 
-class TrackingConnector:
+class TrackingConnector(object):
     """
     The TrackingConnector class provides an interface to the local SQLite tracking database. Underneath, it uses some
     of the code from ngi_pipeline.engines.piper_ngi.database

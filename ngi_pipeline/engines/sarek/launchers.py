@@ -3,7 +3,7 @@ import time
 from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnector
 from ngi_pipeline.engines.sarek.exceptions import SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.local_process_tracking import update_charon_with_local_jobs_status
-from ngi_pipeline.engines.sarek.models import SarekAnalysis
+from ngi_pipeline.engines.sarek.models.sarek import SarekAnalysis
 from ngi_pipeline.engines.sarek.process import SlurmConnector
 
 

@@ -20,7 +20,7 @@ class BestPracticeAnalysisNotRecognized(SarekException):
     def __init__(self, best_practice_analysis):
         super(BestPracticeAnalysisNotRecognized, self).__init__(
             "best-practice-analysis '{}' not recognized".format(best_practice_analysis))
-        self.best_practice_analysis= best_practice_analysis
+        self.best_practice_analysis = best_practice_analysis
 
 
 class ReferenceGenomeNotRecognized(Exception):
@@ -29,17 +29,6 @@ class ReferenceGenomeNotRecognized(Exception):
         super(ReferenceGenomeNotRecognized, self).__init__(
             "reference genome '{}' not recognized".format(genome_name))
         self.genome_name = genome_name
-
-
-class SampleAnalysisStatusNotFoundError(Exception):
-
-    def __init__(self, projectid, sampleid, reason=None):
-        super(SampleAnalysisStatusNotFoundError, self).__init__(
-            "sample analysis status not found for sample '{}' in project '{}'{}".format(
-                sampleid, projectid, ": {}".format(reason.__repr__()) if reason else ""))
-        self.projectid = projectid
-        self.sampleid = sampleid
-        self.reason = reason
 
 
 class SampleNotValidForAnalysisError(Exception):
@@ -53,42 +42,79 @@ class SampleNotValidForAnalysisError(Exception):
         self.reason = reason
 
 
-class SampleLookupError(Exception):
+class DatabaseSampleException(Exception):
 
-    def __init__(self, projectid, sampleid, reason=None):
-        super(SampleLookupError, self).__init__(
-            "error fetching property for sample '{}' in project '{}'{}".format(
-                sampleid, projectid, ": {}".format(reason.__repr__()) if reason else ""))
+    MESSAGE = "sample database exception"
+
+    def __init__(self, projectid, sampleid, message=None, reason=None):
+        super(DatabaseSampleException, self).__init__(
+            "{}{} for sample '{}' in project '{}'".format(
+                message or self.MESSAGE,
+                " ({})".format(reason) if reason else "",
+                sampleid,
+                projectid))
         self.projectid = projectid
         self.sampleid = sampleid
+        self.message = message or self.MESSAGE
         self.reason = reason
 
 
-class SampleAnalysisStatusNotSetError(Exception):
+class DatabaseSeqrunException(DatabaseSampleException):
+
+    MESSAGE = "seqrun database exception"
+
+    def __init__(self, projectid, sampleid, libprepid, seqrunid, message=None, reason=None):
+        super(DatabaseSeqrunException, self).__init__(
+            projectid,
+            sampleid,
+            "{} for seqrun '{}' in libprep '{}'".format(message or self.MESSAGE, seqrunid, libprepid),
+            reason)
+        self.libprepid = libprepid
+        self.seqrunid = seqrunid
+
+
+class SampleAnalysisStatusNotFoundError(DatabaseSampleException):
+
+    MESSAGE = "sample analysis status not found"
+
+
+class SampleLookupError(DatabaseSampleException):
+
+    MESSAGE = "error fetching sample property from Charon"
+
+
+class SampleUpdateError(DatabaseSampleException):
+
+    MESSAGE = "sample attribute could not be set"
+
+
+class SeqrunUpdateError(DatabaseSeqrunException):
+
+    MESSAGE = "seqrun attribute could not be set"
+
+
+class SampleAnalysisStatusNotSetError(DatabaseSampleException):
 
     def __init__(self, projectid, sampleid, status, reason=None):
         super(SampleAnalysisStatusNotSetError, self).__init__(
-            "sample analysis status '{}' could not be set for sample '{}' in project '{}'{}".format(
-                status, sampleid, projectid, ": {}".format(reason.__repr__()) if reason else ""))
-        self.projectid = projectid
-        self.sampleid = sampleid
+            projectid,
+            sampleid,
+            message="sample analysis status '{}' could not be set".format(status),
+            reason=reason)
         self.status = status
-        self.reason = reason
 
 
-class SampleAlignmentStatusNotSetError(Exception):
+class SampleAlignmentStatusNotSetError(DatabaseSeqrunException):
 
     def __init__(self, projectid, sampleid, libprepid, seqrunid, status, reason=None):
         super(SampleAlignmentStatusNotSetError, self).__init__(
-            "seqrun alignment status '{}' could not be set for seqrun '{}' on libprep '{}' for sample '{}' in project"
-            " '{}'{}".format(status, seqrunid, libprepid, sampleid, projectid, ": {}".format(
-                reason.__repr__()) if reason else ""))
-        self.projectid = projectid
-        self.sampleid = sampleid
-        self.libprepid = libprepid
-        self.seqrunid = seqrunid
+            projectid,
+            sampleid,
+            libprepid,
+            seqrunid,
+            message="seqrun alignment status '{}' could not be set".format(status),
+            reason=reason)
         self.status = status
-        self.reason = reason
 
 
 class SlurmStatusNotRecognizedError(Exception):
@@ -114,3 +140,21 @@ class AlignmentStatusForAnalysisStatusNotFoundError(Exception):
         super(AlignmentStatusForAnalysisStatusNotFoundError, self).__init__(
             "Charon alignment status corresponding to analysis status {} not found".format(analysis_status))
         self.analysis_status = analysis_status
+
+
+class ParserException(Exception):
+
+    def __init__(self, instance, message):
+        super(ParserException, self).__init__(
+            "{} raised an exception: {}".format(type(instance).__name__, message)
+        )
+        self.instance = instance
+
+
+class ParserMetricNotFoundException(ParserException):
+
+    def __init__(self, instance, metric):
+        super(ParserMetricNotFoundException, self).__init__(
+            instance,
+            "'{}' not retrieable by parser type".format(metric))
+        self.metric = metric
