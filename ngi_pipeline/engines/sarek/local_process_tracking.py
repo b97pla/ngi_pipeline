@@ -51,6 +51,8 @@ def update_charon_with_local_jobs_status(
         analysis_tracker.report_analysis_results()
         # remove the analysis entry from the local db
         analysis_tracker.remove_analysis()
+        # do cleanup
+        analysis_tracker.cleanup()
 
 
 class AnalysisTracker(object):
@@ -237,3 +239,10 @@ class AnalysisTracker(object):
         else:
             msg = "{} skipped".format(msg)
         self.log.debug(msg)
+
+    def cleanup(self):
+        # only cleanup if the process exited successfully
+        if self.process_status != ProcessExitStatusSuccessful:
+            return
+
+        self.analysis_sample.analysis_object.cleanup(self.analysis_sample)

@@ -2,6 +2,7 @@ import datetime
 import errno
 import os
 import re
+import shutil
 import subprocess
 
 from ngi_pipeline.engines.sarek.exceptions import SlurmStatusNotRecognizedError
@@ -43,6 +44,16 @@ class ProcessConnector(object):
                 return proc.pid
             except RuntimeError:
                 raise
+
+    @staticmethod
+    def cleanup(target_dir):
+        """
+        Remove a specified target directory, regardless whether it's empty or not.
+
+        :param target_dir: the full path to the target directory
+        :return: None
+        """
+        shutil.rmtree(target_dir)
 
 
 class ProcessStatus(object):

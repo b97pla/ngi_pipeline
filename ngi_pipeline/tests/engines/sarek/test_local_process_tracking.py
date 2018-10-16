@@ -181,3 +181,18 @@ class TestAnalysisTracker(unittest.TestCase):
             tracker.process_status = status
             tracker.remove_analysis()
             tracker.tracking_connector.remove_analysis.assert_called_once_with(tracker.analysis_entry)
+
+    def test_cleanup(self, *mocks):
+        tracker = self.get_tracker_instance(*mocks)
+        cleanup_fn = tracker.analysis_sample.analysis_object.cleanup
+
+        # do not cleanup for processes that have not finished successfully
+        for status in [ProcessStopped, ProcessExitStatusUnknown, ProcessRunning, ProcessExitStatusFailed]:
+            tracker.process_status = status
+            tracker.cleanup()
+            cleanup_fn.assert_not_called()
+
+        # do cleanup if process has finished successfully
+        tracker.process_status = ProcessExitStatusSuccessful
+        tracker.cleanup()
+        cleanup_fn.assert_called_once_with(tracker.analysis_sample)
