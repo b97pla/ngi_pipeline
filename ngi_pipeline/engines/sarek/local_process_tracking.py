@@ -32,27 +32,32 @@ def update_charon_with_local_jobs_status(
     log.debug("updating Charon status for locally tracked jobs")
     # iterate over the analysis processes tracked in the local database
     for analysis in tracking_connector.tracked_analyses():
-        log.debug("checking status for analysis of {}:{} with {}:{}, having {}".format(
-            analysis.project_id,
-            analysis.sample_id,
-            analysis.engine,
-            analysis.workflow,
-            "pid {}".format(analysis.process_id) if analysis.process_id is not None else
-            "sbatch job id {}".format(analysis.slurm_job_id)))
-        # create an AnalysisTracker instance for the analysis
-        analysis_tracker = AnalysisTracker(analysis, charon_connector, tracking_connector, log, config)
-        # recreate the analysis_sample from disk/analysis
-        analysis_tracker.recreate_analysis_sample()
-        # poll the system for the analysis status
-        analysis_tracker.get_analysis_status()
-        # set the analysis status
-        analysis_tracker.report_analysis_status()
-        # set the analysis results
-        analysis_tracker.report_analysis_results()
-        # remove the analysis entry from the local db
-        analysis_tracker.remove_analysis()
-        # do cleanup
-        analysis_tracker.cleanup()
+        try:
+            log.debug("checking status for analysis of {}:{} with {}:{}, having {}".format(
+                analysis.project_id,
+                analysis.sample_id,
+                analysis.engine,
+                analysis.workflow,
+                "pid {}".format(analysis.process_id) if analysis.process_id is not None else
+                "sbatch job id {}".format(analysis.slurm_job_id)))
+            # create an AnalysisTracker instance for the analysis
+            analysis_tracker = AnalysisTracker(analysis, charon_connector, tracking_connector, log, config)
+            # recreate the analysis_sample from disk/analysis
+            analysis_tracker.recreate_analysis_sample()
+            # poll the system for the analysis status
+            analysis_tracker.get_analysis_status()
+            # set the analysis status
+            analysis_tracker.report_analysis_status()
+            # set the analysis results
+            analysis_tracker.report_analysis_results()
+            # remove the analysis entry from the local db
+            analysis_tracker.remove_analysis()
+            # do cleanup
+            analysis_tracker.cleanup()
+        except Exception as e:
+            log.error("exception raised when processing sample {} in project {}, please review: {}".format(
+                analysis.project_id, analysis.sample_id, e))
+            raise
 
 
 class AnalysisTracker(object):
