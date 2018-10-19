@@ -245,4 +245,6 @@ class AnalysisTracker(object):
         if self.process_status != ProcessExitStatusSuccessful:
             return
 
+        self.log.info("analysis of sample {} finished successfully, removing temporary work directory".format(
+            self.analysis_sample.sampleid))
         self.analysis_sample.analysis_object.cleanup(self.analysis_sample)
