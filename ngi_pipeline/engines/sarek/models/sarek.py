@@ -347,6 +347,9 @@ class SarekAnalysis(object):
     def collect_analysis_metrics(self, analysis_sample):
         raise NotImplementedError("collection of analysis results should be implemented by subclasses")
 
+    def cleanup(self, analysis_sample):
+        self.process_connector.cleanup(analysis_sample.sample_analysis_work_dir())
+
     def create_tsv_file(self, analysis_sample):
         """
         Create a tsv file containing the information needed by Sarek for starting the analysis. Will decide the path to
@@ -402,6 +405,10 @@ class SarekAnalysis(object):
     @classmethod
     def sample_analysis_tsv_file(cls, *args):
         return cls._sample_analysis_file(*args, extension="tsv")
+
+    @classmethod
+    def sample_analysis_work_dir(cls, *args):
+        return os.path.join(cls.sample_analysis_path(*args), "work")
 
 
 class SarekGermlineAnalysis(SarekAnalysis):

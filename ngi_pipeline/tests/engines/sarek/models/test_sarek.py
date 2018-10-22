@@ -197,6 +197,14 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
             tracking_connector=tracking_connector_mock,
             process_connector=process_connector_mock)
 
+    def test_cleanup(self, *mocks):
+        sarek_analysis = self.get_instance(*mocks)
+        with mock.patch("ngi_pipeline.engines.sarek.models.sample.SarekAnalysisSample", autospec=True) as sample_mock:
+            expected_work_dir = "path/to/work/dir"
+            sample_mock.sample_analysis_work_dir.return_value = expected_work_dir
+            sarek_analysis.cleanup(sample_mock)
+            sarek_analysis.process_connector.cleanup.assert_called_once_with(expected_work_dir)
+
     def test_command_line(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         sarek_analysis = self.get_instance(

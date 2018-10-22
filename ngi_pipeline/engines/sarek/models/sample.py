@@ -65,6 +65,9 @@ class SarekAnalysisSample(object):
         """
         return self.analysis_object.sample_analysis_tsv_file(self.project_base_path, self.projectid, self.sampleid)
 
+    def sample_analysis_work_dir(self):
+        return self.analysis_object.sample_analysis_work_dir(self.project_base_path, self.projectid, self.sampleid)
+
     def _get_sample_librep(self, libprepid):
         """
         :param libprepid: the libprep id to return the corresponding NGILibprep object for

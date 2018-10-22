@@ -17,7 +17,10 @@ class TestProcessConnector(unittest.TestCase):
         self.process_connector = ProcessConnector(cwd=self.tdir)
 
     def tearDown(self):
-        shutil.rmtree(self.tdir)
+        try:
+            shutil.rmtree(self.tdir)
+        except OSError:
+            pass
 
     def test_execute_process(self):
         expected_pid = 12345
@@ -59,6 +62,13 @@ class TestProcessConnector(unittest.TestCase):
             with self.assertRaises(OSError) as ose:
                 self.process_connector.execute_process("this-is-a-command-line", working_dir=working_dir)
                 self.assertEqual(expected_exception, ose.exception)
+
+    def test_cleanup(self):
+        self.assertTrue(os.path.exists(self.tdir))
+        # create a file in the dir so it's not empty
+        with tempfile.TemporaryFile(dir=self.tdir):
+            self.process_connector.cleanup(self.tdir)
+            self.assertFalse(os.path.exists(self.tdir))
 
 
 class TestProcessExitStatus(unittest.TestCase):
