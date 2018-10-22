@@ -434,7 +434,7 @@ class SarekGermlineAnalysis(SarekAnalysis):
         return [SarekPreprocessingStep(
             *step_args, sample=analysis_sample.sample_analysis_tsv_file(), **local_sarek_config)] + map(
             lambda step: step(*step_args, **local_sarek_config),
-            [SarekGermlineVCStep, SarekAnnotateStep, SarekMultiQCStep])
+            [SarekGermlineVCStep, SarekAnnotateStep])
 
     def command_line(self, analysis_sample):
         """

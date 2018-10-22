@@ -240,8 +240,10 @@ class SlurmConnector(ProcessConnector):
         :return: the path to the created SLURM script
         """
         # create the script in the passed working directory
+        slurm_script_dir = os.path.join(working_dir, "sbatch")
+        safe_makedir(slurm_script_dir)
         slurm_script = os.path.join(
-            working_dir, "{}.{}.sbatch".format(job_name, datetime.datetime.now().strftime("%s")))
+            slurm_script_dir, "{}.{}.sbatch".format(job_name, datetime.datetime.now().strftime("%s")))
         slurm_stdout = "{}.out".format(slurm_script)
         slurm_stderr = "{}.err".format(slurm_script)
 

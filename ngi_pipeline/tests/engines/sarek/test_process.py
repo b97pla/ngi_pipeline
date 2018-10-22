@@ -201,13 +201,7 @@ class TestSlurmConnector(unittest.TestCase):
         expected_command_line = "this-is-a-command-line"
         expected_exit_code_path = "this-is-the-exit-code-path"
         expected_job_name = "test_slurm_job"
-
-        # a non-existing working dir will result in an exception
-        expected_working_dir = os.path.join(self.cwd, "this-folder-does-not-exist")
-        with self.assertRaises(IOError) as ioe:
-            self.slurm_connector._slurm_script_from_command_line(
-                expected_command_line, expected_working_dir, expected_exit_code_path, expected_job_name)
-            self.assertEqual(errno.ENOENT, ioe.exception.errno)
+        expected_script_dir = os.path.join(self.cwd, "sbatch")
 
         expected_prefix = "mock_prefix"
         expected_script_name = "{}.{}.sbatch".format(expected_job_name, expected_prefix)
@@ -216,6 +210,5 @@ class TestSlurmConnector(unittest.TestCase):
             observed_script = self.slurm_connector._slurm_script_from_command_line(
                 expected_command_line, self.cwd, expected_exit_code_path, expected_job_name)
             self.assertTrue(os.path.exists(observed_script))
-            self.assertEqual(self.cwd, os.path.dirname(observed_script))
+            self.assertEqual(expected_script_dir, os.path.dirname(observed_script))
             self.assertEqual(expected_script_name, os.path.basename(observed_script))
-
