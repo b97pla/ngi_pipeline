@@ -177,7 +177,7 @@ class SlurmConnector(ProcessConnector):
     """
 
     # a boilerplate template for the SLURM job header
-    JOB_HEADER_TEMPLATE = """#! /bin/bash
+    JOB_HEADER_TEMPLATE = """#! /bin/bash -l
 
 #SBATCH -A {slurm_project}
 #SBATCH -J "{slurm_job_name}"
