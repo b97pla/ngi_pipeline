@@ -57,7 +57,6 @@ def update_charon_with_local_jobs_status(
         except Exception as e:
             log.error("exception raised when processing sample {} in project {}, please review: {}".format(
                 analysis.project_id, analysis.sample_id, e))
-            raise
 
 
 class AnalysisTracker(object):
