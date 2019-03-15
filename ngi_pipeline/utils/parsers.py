@@ -178,7 +178,7 @@ def get_sample_numbers_from_samplesheet(samplesheet_path):
         ss_lane_num = int(_get_and_trim_field_value(row, ["Lane"]))
         ss_libprepid = _get_libprepid_from_description(
             _get_and_trim_field_value(row, ["Description"]))
-        fingerprint = "-".join([ss_project_id, ss_sample_id, ss_barcode])
+        fingerprint = "-".join([ss_project_id, ss_sample_id])
         if fingerprint not in seen_samples:
             seen_samples.append(fingerprint)
         ss_sample_number = seen_samples.index(fingerprint) + 1
