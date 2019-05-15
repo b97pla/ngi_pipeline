@@ -132,4 +132,4 @@ class TestCommon(unittest.TestCase):
         with mock.patch('ngi_pipeline.utils.parsers.parse_samplesheet') as samplesheet_mock:
             samplesheet_mock.return_value = samplesheet_rows
             observed_sample_numbers = get_sample_numbers_from_samplesheet("samplesheet_path")
-            self.assertListEqual(["S1", "S2", "S1", "S3", "S4"], [osn[0] for osn in observed_sample_numbers])
+            self.assertListEqual(["S1", "S2", "S1", "S1", "S1"], [osn[0] for osn in observed_sample_numbers])
