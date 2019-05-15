@@ -118,7 +118,7 @@ class SarekPreprocessingStep(SarekWorkflowStep):
         return [
             [
                 QualiMapParser,
-                os.path.join(report_dir, "bamQC", analysis_sample.sampleid, "genome_results.txt")],
+                os.path.join(report_dir, "bamQC", "{}.recal".format(analysis_sample.sampleid), "genome_results.txt")],
             [
                 PicardMarkDuplicatesParser,
                 os.path.join(markdups_dir, markdups_metrics_file)]]
