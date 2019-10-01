@@ -22,11 +22,11 @@ analysis:
     # top_dir is the directory used by the pipeline as a starting point to build up the analysis run
     # see ngi_pipeline/utils/filesystem.py for details.
     # for nestor the default is /proj/a2014205/nobackup/NGI/analysis_ready
-    top_dir: /lupus/ngi/staging/wildwest/ngi2016001/nobackup/NGI
-    sthlm_root: ngi2016003
-    upps_root: ngi2016001
+    top_dir: /Users/polar516/Documents/code/ngi_pipeline/ngi_pipeline/tests/resources/base_root_dir/root_dir_B/analysis_top_dir
+    sthlm_root: root_dir_A
+    upps_root: root_dir_B
     # for nestor it is simply /proj
-    base_root: /lupus/ngi/staging/wildwest
+    base_root: /Users/polar516/Documents/code/ngi_pipeline/ngi_pipeline/tests/resources/base_root_dir
 
 database:
     # SQLite file to know what/where/how things are happening (state machine to back up Charon for network failure)
@@ -47,26 +47,26 @@ database:
     # );
     # Compulsory to define: to make sure you are not overwriting the production version below, it is commented out, 
     # forcing you to edit the config file
-    record_tracking_db_path: /lupus/ngi/staging/wildwest/ngi2016001/private/db/record_tracking_database.sql
+    record_tracking_db_path: ngi_pipeline/tests/resources/record_tracking_database.sql
 
 environment:
     project_id: ngi2016001
     # directory containing scripts like ngi_pipeline_start.py, print_running_jobs.py etc
     # on nestor the production code at /proj/a2014205/software/ngi_pipeline/scripts
-    ngi_scripts_dir:    /lupus/ngi/staging/latest/sw/ngi_pipeline/scripts
+    ngi_scripts_dir:    ngi_pipeline/scripts
     conda_env: ngi_pipeline
     # Flowcell directories; the path string must contain the strings either /a2014205/ or /a2015179/
     # see ngi_pipeline/ngi_pipeline/conductor/flowcell.py:setup_analysis_directory_structure() for details
     # On nestor the default values should be /proj/a2014205/archive /proj/a2015179/archive
     flowcell_inbox: 
-            - /lupus/ngi/staging/wildwest/ngi2016001/incoming
-            - /lupus/ngi/staging/wildwest/ngi2016003/incoming
+            - ngi_pipeline/tests/resources/base_root_dir/root_dir_A/inbox
+            - ngi_pipeline/tests/resources/base_root_dir/root_dir_B/inbox
 
 logging:
     # the log file itself is compulsory to be defined, or you will get a nasty exception
     # to make sure you are defining it, and not overwriting the production one below, it is left commented out
     # default location is /proj/a2014205/ngi_resources/ngi_pipeline.log
-    log_file: /lupus/ngi/staging/wildwest/ngi2016001/private/log/ngi_pipeline.test.log
+    log_file: ngi_pipeline/tests/resources/ngi_pipeline.test.log
 
 paths: # Hard code paths here if you are that kind of a person
     binaries:
