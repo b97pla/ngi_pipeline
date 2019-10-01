@@ -11,7 +11,7 @@ class TestLaunchers(unittest.TestCase):
     CONFIG = {
         "analysis": {
             "best_practice_analysis": {
-                "sarek_germline_grch38": {
+                "wgs_germline": {
                     "analysis_engine": "ngi_pipeline.engines.sarek"
                 }
             }
@@ -49,7 +49,7 @@ class TestLaunchers(unittest.TestCase):
         return project
 
     @staticmethod
-    def get_NGIAnalysis(best_practice_analysis="sarek_germline_grch38", config=None, log=None):
+    def get_NGIAnalysis(best_practice_analysis="wgs_germline", config=None, log=None):
         project = TestLaunchers.get_NGIProject(1)
         with mock.patch("ngi_pipeline.conductor.classes.CharonSession", autospec=True) as CharonSessionMock:
             charon_mock = CharonSessionMock.return_value

@@ -16,7 +16,9 @@ analysis:
             analysis_engine: ngi_pipeline.engines.piper_ngi
         qc:
             analysis_engine: ngi_pipeline.engines.qc_ngi
-        sarek_germline_grch38:
+        wgs_germline:
+            analysis_engine: ngi_pipeline.engines.sarek
+        exome_germline:
             analysis_engine: ngi_pipeline.engines.sarek
 
     # top_dir is the directory used by the pipeline as a starting point to build up the analysis run
