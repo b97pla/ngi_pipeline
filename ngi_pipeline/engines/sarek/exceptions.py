@@ -4,17 +4,6 @@ class SarekException(Exception):
     pass
 
 
-class BestPracticeAnalysisNotSpecifiedError(SarekException):
-
-    def __init__(self, projectid, reason=None):
-        super(BestPracticeAnalysisNotSpecifiedError, self).__init__(
-            "best-practice-analysis could not be found for project '{}'{}".format(
-                projectid,
-                ": {}".format(reason.__repr__()) if reason else ""))
-        self.projectid = projectid
-        self.reason = reason
-
-
 class BestPracticeAnalysisNotRecognized(SarekException):
 
     def __init__(self, best_practice_analysis):
@@ -42,21 +31,31 @@ class SampleNotValidForAnalysisError(Exception):
         self.reason = reason
 
 
-class DatabaseSampleException(Exception):
+class DatabaseProjectException(Exception):
+
+    MESSAGE = "project database exception"
+
+    def __init__(self, projectid, message=None, reason=None):
+        super(DatabaseProjectException, self).__init__(
+            "{}{} for project '{}'".format(
+                message or self.MESSAGE,
+                " ({})".format(reason) if reason else "",
+                projectid))
+        self.projectid = projectid
+        self.message = message or self.MESSAGE
+        self.reason = reason
+
+
+class DatabaseSampleException(DatabaseProjectException):
 
     MESSAGE = "sample database exception"
 
     def __init__(self, projectid, sampleid, message=None, reason=None):
         super(DatabaseSampleException, self).__init__(
-            "{}{} for sample '{}' in project '{}'".format(
-                message or self.MESSAGE,
-                " ({})".format(reason) if reason else "",
-                sampleid,
-                projectid))
-        self.projectid = projectid
+            projectid,
+            message="{} for sample '{}'".format(message or self.MESSAGE, sampleid),
+            reason=reason)
         self.sampleid = sampleid
-        self.message = message or self.MESSAGE
-        self.reason = reason
 
 
 class DatabaseSeqrunException(DatabaseSampleException):
@@ -71,6 +70,21 @@ class DatabaseSeqrunException(DatabaseSampleException):
             reason)
         self.libprepid = libprepid
         self.seqrunid = seqrunid
+
+
+class BestPracticeAnalysisNotSpecifiedError(DatabaseProjectException):
+
+    MESSAGE = "best-practice-analysis could not be found"
+
+
+class AnalysisPipelineNotSpecifiedError(DatabaseProjectException):
+
+    MESSAGE = "analysis pipeline could not be found"
+
+
+class AnalysisReferenceNotSpecifiedError(DatabaseProjectException):
+
+    MESSAGE = "analysis reference genome could not be found"
 
 
 class SampleAnalysisStatusNotFoundError(DatabaseSampleException):

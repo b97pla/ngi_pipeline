@@ -4,9 +4,10 @@ from ngi_pipeline.database.classes import CharonError, CharonSession
 from ngi_pipeline.engines.sarek.process import ProcessRunning, ProcessExitStatusSuccessful, \
     ProcessExitStatusFailed, ProcessExitStatusUnknown, ProcessConnector, SlurmConnector
 from ngi_pipeline.engines.piper_ngi.database import get_db_session, SampleAnalysis
-from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotSpecifiedError, SampleLookupError, \
-    AnalysisStatusForProcessStatusNotFoundError, SampleAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError, \
-    AlignmentStatusForAnalysisStatusNotFoundError, SampleUpdateError, SeqrunUpdateError
+from ngi_pipeline.engines.sarek.exceptions import AnalysisPipelineNotSpecifiedError, DatabaseProjectException, \
+    BestPracticeAnalysisNotSpecifiedError, SampleLookupError, AnalysisStatusForProcessStatusNotFoundError, \
+    SampleAnalysisStatusNotFoundError, SampleAnalysisStatusNotSetError, AlignmentStatusForAnalysisStatusNotFoundError, \
+    SampleUpdateError, SeqrunUpdateError, AnalysisReferenceNotSpecifiedError
 
 
 class CharonConnector(object):
@@ -43,13 +44,23 @@ class CharonConnector(object):
         self.log = log
         self.charon_session = charon_session or CharonSession(config=self.config)
 
-    def best_practice_analysis(self, projectid):
+    def _fetch_project_field(self, projectid, field_key, exception_type=None):
         try:
-            return self.charon_session.project_get(projectid)["best_practice_analysis"]
+            return self.charon_session.project_get(projectid)[field_key]
         except (KeyError, CharonError) as e:
-            best_practice_analysis_exception = BestPracticeAnalysisNotSpecifiedError(projectid, reason=e)
-            self.log.error(best_practice_analysis_exception)
-            raise best_practice_analysis_exception
+            exception_type = exception_type or DatabaseProjectException
+            exception = exception_type(projectid, reason=e)
+            self.log.error(exception)
+            raise exception
+
+    def analysis_pipeline(self, projectid):
+        return self._fetch_project_field(projectid, "pipeline", AnalysisPipelineNotSpecifiedError)
+
+    def analysis_reference(self, projectid):
+        return self._fetch_project_field(projectid, "reference", AnalysisReferenceNotSpecifiedError)
+
+    def best_practice_analysis(self, projectid):
+        return self._fetch_project_field(projectid, "best_practice_analysis", BestPracticeAnalysisNotSpecifiedError)
 
     def sample_analysis_status(self, projectid, sampleid):
         try:

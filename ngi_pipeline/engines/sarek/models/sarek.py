@@ -85,13 +85,14 @@ class SarekAnalysis(object):
         Gets the type of the SarekAnalysis instance to use for a supplied workflow name.
 
         :param workflow: name of the workflow
-        :return: a SarekAnalysis type appropriate for the workflow or None if no appropriate type exists
+        :return: a SarekAnalysis type appropriate for the workflow
+        :raises BestPracticeAnalysisNotRecognized: if no suitable analysis type was found for the workflow
         """
         if workflow == "SarekAnalysis":
             return SarekAnalysis
         if workflow == "SarekGermlineAnalysis":
             return SarekGermlineAnalysis
-        return None
+        raise BestPracticeAnalysisNotRecognized(workflow)
 
     @staticmethod
     def get_analysis_instance_for_workflow(
@@ -155,13 +156,18 @@ class SarekAnalysis(object):
         tracking_connector = tracking_connector or TrackingConnector(config, log)
         process_connector = process_connector or ProcessConnector(cwd=os.curdir)
 
-        # fetch the best practice analysis specified in Charon. This is expected to be a string formatted as:
-        # ENGINE_MODE_GENOME, e.g. "Sarek_Germline_GRCh38"
-        best_practice_analysis = charon_connector.best_practice_analysis(projectid)
+        # fetch the best practice analysis pipeline and reference specified in Charon
+        analysis_pipeline = charon_connector.analysis_pipeline(projectid)
+        analysis_type = charon_connector.best_practice_analysis(projectid)
+        analysis_reference = charon_connector.analysis_reference(projectid)
+        reference_genome = ReferenceGenome.get_instance(analysis_reference)
 
-        reference_genome = ReferenceGenome.get_instance(best_practice_analysis.split("_")[2])
-        sarek_analysis_type = best_practice_analysis.split("_")[1].lower()
-        if sarek_analysis_type == "germline":
+        # we can only run Sarek analyses in this module
+        if analysis_pipeline.lower() != "sarek":
+            raise BestPracticeAnalysisNotRecognized(analysis_pipeline)
+
+        # currently, we use the same analysis pipeline for targeted and wgs data
+        if analysis_type.lower() in ["exome_germline", "wgs_germline"]:
             return SarekGermlineAnalysis(
                 reference_genome,
                 config,
@@ -169,10 +175,10 @@ class SarekAnalysis(object):
                 charon_connector,
                 tracking_connector,
                 process_connector)
-        elif sarek_analysis_type == "somatic":
+        elif analysis_type in ["exome_somatic", "wgs_somatic"]:
             raise NotImplementedError(
-                "best-practice.analysis for {} is not implemented".format(best_practice_analysis))
-        raise BestPracticeAnalysisNotRecognized(best_practice_analysis)
+                "best-practice.analysis for {} is not implemented".format(analysis_type))
+        raise BestPracticeAnalysisNotRecognized(analysis_type)
 
     def status_should_be_started(
             self,

@@ -27,7 +27,8 @@ class TestSarekAnalysis(unittest.TestCase):
     def test_get_analysis_instance_for_project_germline(self, charon_connector_mock, reference_genome_mock):
         reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
         charon_connector = charon_connector_mock.return_value
-        charon_connector.best_practice_analysis.return_value = "something_germline_something"
+        charon_connector.best_practice_analysis.return_value = "wgs_germline"
+        charon_connector.analysis_pipeline.return_value = "sarek"
         expected_analysis_class = SarekGermlineAnalysis
         observed_analysis_instance = SarekAnalysis.get_analysis_instance_for_project(
             "this-is-a-project-id",
@@ -39,7 +40,8 @@ class TestSarekAnalysis(unittest.TestCase):
     def test_get_analysis_instance_for_project_somatic(self, charon_connector_mock, reference_genome_mock):
         reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
         charon_connector = charon_connector_mock.return_value
-        charon_connector.best_practice_analysis.return_value = "something_somatic_something"
+        charon_connector.best_practice_analysis.return_value = "wgs_somatic"
+        charon_connector.analysis_pipeline.return_value = "sarek"
         with self.assertRaises(NotImplementedError):
             SarekAnalysis.get_analysis_instance_for_project(
                 "this-is-a-project-id",
