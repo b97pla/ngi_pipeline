@@ -49,7 +49,7 @@ def load_yaml_config(config_file_path):
     :rtype: dict
     :raises IOError: If the config file cannot be opened.
     """
-    return load_generic_config(config_file_path, config_format="yaml")
+    return load_generic_config(config_file_path, config_format="yaml", Loader=yaml.FullLoader)
 
 
 def load_generic_config(config_file_path, config_format="yaml", **kwargs):
