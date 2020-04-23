@@ -5,8 +5,7 @@ from ngi_pipeline.engines.sarek.database import CharonConnector, TrackingConnect
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, SampleNotValidForAnalysisError
 from ngi_pipeline.engines.sarek.models.resources import ReferenceGenome
 from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
-from ngi_pipeline.engines.sarek.models.workflow import SarekPreprocessingStep, SarekGermlineVCStep, SarekAnnotateStep, \
-    SarekMultiQCStep
+from ngi_pipeline.engines.sarek.models.workflow import SarekMainStep
 from ngi_pipeline.engines.sarek.parsers import ParserIntegrator
 from ngi_pipeline.engines.sarek.process import ProcessConnector, ProcessRunning, ProcessExitStatusSuccessful, \
     ProcessExitStatusFailed
@@ -432,15 +431,16 @@ class SarekGermlineAnalysis(SarekAnalysis):
         """
         # get the path to the nextflow executable and the sarek main script. If not present in the config, rely on the
         # environment to be aware of them
-        step_args = [
-            self.sarek_config.get("nf_path", "nextflow"),
-            self.sarek_config.get("sarek_path", "sarek")]
+        nf_path = self.sarek_config.get("nf_path", "nextflow")
+        sarek_path = self.sarek_config.get("sarek_path", "sarek")
         local_sarek_config = {"outDir": analysis_sample.sample_analysis_path()}
         local_sarek_config.update(self.sarek_config)
-        return [SarekPreprocessingStep(
-            *step_args, sample=analysis_sample.sample_analysis_tsv_file(), **local_sarek_config)] + map(
-            lambda step: step(*step_args, **local_sarek_config),
-            [SarekGermlineVCStep, SarekAnnotateStep])
+        return [
+            SarekMainStep(
+                nf_path,
+                sarek_path,
+                input=analysis_sample.sample_analysis_tsv_file(),
+                **local_sarek_config)]
 
     def command_line(self, analysis_sample):
         """

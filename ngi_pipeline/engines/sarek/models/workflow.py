@@ -29,8 +29,6 @@ class SarekWorkflowStep(object):
         self.sarek_path = path_to_sarek
         # create a dict with parameters based on the passed key=value arguments
         self.sarek_args = {k: v for k, v in sarek_args.items() if k not in ["nf_path", "sarek_path"]}
-        # add/filter a tools parameter against the valid tools for the workflow step
-        self.sarek_args["tools"] = self.valid_tools(self.sarek_args.get("tools", []))
         # expand any parameters passed as list items into a ","-separated string
         self.sarek_args = {k: v if type(v) is not list else ",".join(v) for k, v in self.sarek_args.items()}
 
@@ -60,7 +58,7 @@ class SarekWorkflowStep(object):
 
         :return: the command line for the workflow step as a string
         """
-        single_hyphen_args = ["config", "profile"]
+        single_hyphen_args = ["config", "profile", "resume"]
         template_string = "${nf_path} run ${sarek_step_path}"
         for argument_name in single_hyphen_args:
             template_string = self._append_argument(template_string, argument_name, hyphen="-")
@@ -75,21 +73,12 @@ class SarekWorkflowStep(object):
     def sarek_step(self):
         raise NotImplementedError("The Sarek workflow step definition for {} has not been defined".format(type(self)))
 
-    def valid_tools(self, tools):
-        """
-        Filter a list of tools against the list of available tools for the analysis step.
-
-        :param tools: a list of tool names
-        :return: a list of tool names valid for this workflow step
-        """
-        return list(filter(lambda t: t in self.available_tools, tools))
-
     @classmethod
     def report_files(cls, analysis_sample):
         return []
 
 
-class SarekPreprocessingStep(SarekWorkflowStep):
+class SarekMainStep(SarekWorkflowStep):
 
     def sarek_step(self):
         return "main.nf"
@@ -122,33 +111,3 @@ class SarekPreprocessingStep(SarekWorkflowStep):
             [
                 PicardMarkDuplicatesParser,
                 os.path.join(markdups_dir, markdups_metrics_file)]]
-
-
-class SarekGermlineVCStep(SarekWorkflowStep):
-
-    available_tools = [
-        "haplotypecaller",
-        "strelka",
-        "manta"
-    ]
-
-    def sarek_step(self):
-        return "germlineVC.nf"
-
-
-class SarekAnnotateStep(SarekWorkflowStep):
-
-    available_tools = [
-        "snpeff",
-        "vep"
-    ]
-
-    def sarek_step(self):
-        return "annotate.nf"
-
-
-class SarekMultiQCStep(SarekWorkflowStep):
-
-    def sarek_step(self):
-        return "runMultiQC.nf"
-

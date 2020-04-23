@@ -214,7 +214,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
         sample_obj = self.analysis_obj.project.samples.values()[0]
         analysis_sample = SarekAnalysisSample(self.analysis_obj.project, sample_obj, sarek_analysis)
         self.config["outDir"] = analysis_sample.sample_analysis_path()
-        self.config["sample"] = analysis_sample.sample_analysis_tsv_file()
+        self.config["input"] = analysis_sample.sample_analysis_tsv_file()
         observed_cmd = sarek_analysis.command_line(analysis_sample)
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
