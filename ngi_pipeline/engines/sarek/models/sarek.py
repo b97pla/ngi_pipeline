@@ -433,7 +433,9 @@ class SarekGermlineAnalysis(SarekAnalysis):
         # environment to be aware of them
         nf_path = self.sarek_config.get("nf_path", "nextflow")
         sarek_path = self.sarek_config.get("sarek_path", "sarek")
-        local_sarek_config = {"outDir": analysis_sample.sample_analysis_path()}
+        local_sarek_config = {
+            "resume": " ",
+            "outDir": analysis_sample.sample_analysis_path()}
         local_sarek_config.update(self.sarek_config)
         return [
             SarekMainStep(
