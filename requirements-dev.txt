@@ -1,7 +1,7 @@
 -r requirements.txt
-codecov==2.0.9
+codecov
 mock
-nose>=1.3.3
-nose-exclude>=0.2.0
-pytest==3.1.2
-pytest-cov==2.5.1
+nose
+nose-exclude
+pytest
+pytest-cov
