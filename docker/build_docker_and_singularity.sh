@@ -7,7 +7,7 @@
 rm -f ngi_pipeline.sif
 
 # build docker image
-docker build -t ngi_pipeline:latest .
+docker build -t ngi_pipeline:latest -f docker/Dockerfile .
 
 # build singularity image from docker imnage
 singularity build ngi_pipeline.sif docker-daemon:ngi_pipeline:latest

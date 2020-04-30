@@ -1,12 +1,12 @@
 FROM continuumio/miniconda:latest
 
-COPY docker_ngi_config.yaml /conf/ngi_config.yaml
+COPY docker/ngi_config.yaml /conf/ngi_config.yaml
 COPY . /ngi_pipeline
 WORKDIR /ngi_pipeline
 
 RUN \
   conda upgrade -y pip && \
-  /bin/sh conda_install.sh && \
+  /bin/sh docker/conda_install.sh && \
   pip install -r requirements-dev.txt && \
   python setup.py develop
 

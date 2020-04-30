@@ -16,8 +16,9 @@ CHARON_BASE_URL=this-is-charon-url
 CHARON_API_TOKEN=this-is-charon-token
 
 singularity exec --bind \
-#/path/to/dev/src/code:/ngi_pipeline,\
 /lupus/ngi/staging/latest/sw:/sw,\
 /lupus/ngi/staging/latest/resources:/resources,\
 /lupus/ngi/staging/wildwest/ngi2016001:/data/ngi2016000 \
 ngi_pipeline.sif $@
+
+# --bind /path/to/dev/src/code:/ngi_pipeline
