@@ -18,8 +18,7 @@ class TestSarekWorkflowStep(unittest.TestCase):
 
     def setUp(self):
         self.sarek_args = self.CONFIG.copy()
-        self.sarek_workflow_step = SarekWorkflowStep(
-            self.sarek_args["nf_path"], self.sarek_args["sarek_path"], **self.sarek_args)
+        self.sarek_workflow_step = SarekWorkflowStep(**self.sarek_args)
 
     def test__append_argument(self):
         base_string = "this-is-the-base-string"
@@ -60,13 +59,10 @@ class TestSarekWorkflowStep(unittest.TestCase):
 
     def test_command_line(self):
         sarek_step = "sarek_step"
-        sarek_workflow_step = SarekWorkflowStep(self.sarek_args["nf_path"], self.sarek_args["sarek_path"])
+        sarek_workflow_step = SarekWorkflowStep()
         with mock.patch.object(sarek_workflow_step, "sarek_step", return_value=sarek_step) as sarek_step_mock:
-            expected_command_line = "{} run {}".format(
-                self.sarek_args["nf_path"],
-                os.path.join(self.sarek_args["sarek_path"], sarek_step))
+            expected_command_line = "sarek"
             self.assertEqual(expected_command_line, sarek_workflow_step.command_line())
-            sarek_step_mock.assert_called_once()
 
     def test_command_line_args(self):
         sarek_step = "sarek_step"

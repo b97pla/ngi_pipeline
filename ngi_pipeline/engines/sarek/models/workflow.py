@@ -13,22 +13,17 @@ class SarekWorkflowStep(object):
 
     available_tools = []
 
-    def __init__(
-            self,
-            path_to_nextflow,
-            path_to_sarek,
-            **sarek_args):
+    def __init__(self, **sarek_args):
         """
         Create a SarekWorkflowStep instance according to the passed parameters.
 
-        :param path_to_nextflow: path to the nextflow executable
-        :param path_to_sarek: path to the main Sarek folder
         :param sarek_args: additional Sarek parameters to be included on the command line
         """
-        self.nf_path = path_to_nextflow
-        self.sarek_path = path_to_sarek
+        # use a separate variable for the command to invoke sarek. This defaults to just "sarek" which is a defined
+        # alias on Irma but it can be overridden through the pipeline config option "sarek_cmd"
+        self.sarek_cmd = sarek_args.get("sarek_cmd", "sarek")
         # create a dict with parameters based on the passed key=value arguments
-        self.sarek_args = {k: v for k, v in sarek_args.items() if k not in ["nf_path", "sarek_path"]}
+        self.sarek_args = {k: v for k, v in sarek_args.items() if k not in ["sarek_cmd"]}
         # expand any parameters passed as list items into a ","-separated string
         self.sarek_args = {k: v if type(v) is not list else ",".join(v) for k, v in self.sarek_args.items()}
 
@@ -59,14 +54,13 @@ class SarekWorkflowStep(object):
         :return: the command line for the workflow step as a string
         """
         single_hyphen_args = ["config", "profile", "resume"]
-        template_string = "${nf_path} run ${sarek_step_path}"
+        template_string = "${sarek_cmd}"
         for argument_name in single_hyphen_args:
             template_string = self._append_argument(template_string, argument_name, hyphen="-")
         for argument_name in filter(lambda n: n not in single_hyphen_args, self.sarek_args.keys()):
             template_string = self._append_argument(template_string, argument_name, hyphen="--")
         command_line = Template(template_string).substitute(
-            nf_path=self.nf_path,
-            sarek_step_path=os.path.join(self.sarek_path, self.sarek_step()),
+            sarek_cmd=self.sarek_cmd,
             **self.sarek_args)
         return command_line
 

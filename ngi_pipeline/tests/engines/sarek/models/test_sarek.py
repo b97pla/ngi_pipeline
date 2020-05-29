@@ -6,6 +6,7 @@ import unittest
 
 from ngi_pipeline.engines.sarek.database import CharonConnector
 from ngi_pipeline.engines.sarek.exceptions import BestPracticeAnalysisNotRecognized, SampleNotValidForAnalysisError
+from ngi_pipeline.engines.sarek.models.resources import ReferenceGenome
 from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
 from ngi_pipeline.engines.sarek.models.sarek import SarekAnalysis, SarekGermlineAnalysis
 from ngi_pipeline.engines.sarek.parsers import ParserIntegrator
@@ -25,7 +26,8 @@ class TestSarekAnalysis(unittest.TestCase):
         self.analysis_obj = TestLaunchers.get_NGIAnalysis(log=self.log)
 
     def test_get_analysis_instance_for_project_germline(self, charon_connector_mock, reference_genome_mock):
-        reference_genome_mock.get_instance.return_value = "this-is-a-reference-genome"
+        reference_genome_mock.get_instance.return_value = reference_genome_mock
+        reference_genome_mock.get_genomes_base_path.return_value = "this-is-the-genomes-base-path"
         charon_connector = charon_connector_mock.return_value
         charon_connector.best_practice_analysis.return_value = "wgs_germline"
         charon_connector.analysis_pipeline.return_value = "sarek"
@@ -103,7 +105,8 @@ class TestSarekAnalysis(unittest.TestCase):
     def test_configure_analysis(self, charon_connector_mock, reference_genome_mock):
         config = {
             "profile": "this-is-a-profile",
-            "tools": ["tool-A", "tool-B"]}
+            "tools": ["tool-A", "tool-B"],
+            "unique-key": "this-is-not-in-the-default-config"}
 
         sarek_analysis = SarekAnalysis(
             reference_genome_mock.return_value,
@@ -113,8 +116,6 @@ class TestSarekAnalysis(unittest.TestCase):
 
         for key in config.keys():
             self.assertEqual(config[key], sarek_analysis.sarek_config[key])
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["nf_path"], sarek_analysis.sarek_config["nf_path"])
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["sarek_path"], sarek_analysis.sarek_config["sarek_path"])
 
         config = {
             "config": "this-is-a-site-specific-config-file",
@@ -125,6 +126,23 @@ class TestSarekAnalysis(unittest.TestCase):
         for key in config.keys():
             self.assertEqual(config[key], sarek_config[key])
         self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["tools"], sarek_config["tools"])
+
+        # test setting the genomes_base parameter
+        expected_path = os.path.join("this", "is", "the", "right", "path")
+        config = {
+            "genomes_base_paths": {
+                "GRCh37": expected_path,
+                "GRCh38": os.path.join("this", "is", "the", "wrong", "path")
+            }
+        }
+        sarek_analysis = SarekAnalysis(
+            ReferenceGenome.get_instance("GRCh37"),
+            {"sarek": config},
+            self.log,
+            charon_connector=charon_connector_mock.return_value)
+        self.assertIn("genomes_base", sarek_analysis.sarek_config)
+        self.assertEqual(expected_path, sarek_analysis.sarek_config["genomes_base"])
+        self.assertNotIn("genomes_base_paths", sarek_analysis.sarek_config)
 
     def test_command_line(self, charon_connector_mock, reference_genome_mock):
 
@@ -219,7 +237,7 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
 
         self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
         self.assertIn("--tools {}".format(",".join(self.config["tools"])), observed_cmd)
-        self.assertTrue(observed_cmd.startswith("{} run {}".format(self.config["nf_path"], self.config["sarek_path"])))
+        self.assertTrue(observed_cmd.startswith("sarek"))
         for key in filter(lambda k: k not in ["profile", "nf_path", "sarek_path", "tools"], self.config.keys()):
             self.assertIn("--{} {}".format(key, self.config[key]), observed_cmd)
 

@@ -23,10 +23,7 @@ class SarekAnalysis(object):
     DEFAULT_CONFIG = {
         "profile": "standard",
         "tools": None,
-        "config": None,
-        "sarek_path": "/lupus/ngi/production/latest/sw/sarek/",
-        "nf_path": "/lupus/ngi/production/latest/sw/nextflow/nextflow",
-        "containerPath": "/lupus/ngi/production/latest/resources/containers/sarek"
+        "config": None
     }
 
     def __init__(
@@ -76,6 +73,15 @@ class SarekAnalysis(object):
         sarek_config = self.DEFAULT_CONFIG.copy()
         sarek_config.update(opts)
         sarek_config.update(config.get("sarek", {}))
+        # make sure to configure the correct genomes_base parameter if it's not set
+        sarek_config["genomes_base"] = sarek_config.get(
+            "genomes_base",
+            self.reference_genome.get_genomes_base_path(sarek_config))
+        # let's unset the genomes_base_paths item since we don't want it to show up on the command line
+        try:
+            del(sarek_config["genomes_base_paths"])
+        except KeyError:
+            pass
         return sarek_config
 
     @staticmethod
@@ -429,18 +435,12 @@ class SarekGermlineAnalysis(SarekAnalysis):
         :param analysis_sample: the SarekAnalysisSample to analyze
         :return: a list of the processing steps included in the analysis
         """
-        # get the path to the nextflow executable and the sarek main script. If not present in the config, rely on the
-        # environment to be aware of them
-        nf_path = self.sarek_config.get("nf_path", "nextflow")
-        sarek_path = self.sarek_config.get("sarek_path", "sarek")
         local_sarek_config = {
             "resume": " ",
             "outDir": analysis_sample.sample_analysis_path()}
         local_sarek_config.update(self.sarek_config)
         return [
             SarekMainStep(
-                nf_path,
-                sarek_path,
                 input=analysis_sample.sample_analysis_tsv_file(),
                 **local_sarek_config)]
 
