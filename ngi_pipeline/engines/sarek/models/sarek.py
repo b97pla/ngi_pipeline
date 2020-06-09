@@ -421,6 +421,10 @@ class SarekAnalysis(object):
     def sample_analysis_work_dir(cls, *args):
         return os.path.join(cls.sample_analysis_path(*args), "work")
 
+    @classmethod
+    def sample_analysis_results_dir(cls, *args):
+        return os.path.join(cls.sample_analysis_path(*args), "results")
+
 
 class SarekGermlineAnalysis(SarekAnalysis):
     """
@@ -437,7 +441,7 @@ class SarekGermlineAnalysis(SarekAnalysis):
         """
         local_sarek_config = {
             "resume": " ",
-            "outDir": analysis_sample.sample_analysis_path()}
+            "outdir": analysis_sample.sample_analysis_results_dir()}
         local_sarek_config.update(self.sarek_config)
         return [
             SarekMainStep(

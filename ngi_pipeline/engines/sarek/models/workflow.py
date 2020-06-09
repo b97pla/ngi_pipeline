@@ -86,7 +86,10 @@ class SarekMainStep(SarekWorkflowStep):
         :return: a list of tuples where the first element is a parser class instance and the second is the path to the
         result file that the parser instance should parse
         """
-        report_dir = os.path.join(analysis_sample.sample_analysis_path(), "Reports")
+        report_dir = os.path.join(
+            analysis_sample.sample_analysis_results_dir(),
+            "Reports",
+            analysis_sample.sampleid)
         # MarkDuplicates output files may be named differently depending on if the pipeline was started with a single
         # fastq file pair or multiple file pairs
         markdups_dir = os.path.join(report_dir, "MarkDuplicates")
