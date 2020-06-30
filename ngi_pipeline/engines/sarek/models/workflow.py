@@ -5,27 +5,17 @@ from ngi_pipeline.engines.sarek.exceptions import ParserException
 from ngi_pipeline.engines.sarek.parsers import QualiMapParser, PicardMarkDuplicatesParser
 
 
-class SarekWorkflowStep(object):
+class WorkflowStep(object):
     """
-    The SarekWorkflowStep class represents an analysis step in the Sarek workflow. Primarily, it provides a method for
-    creating the step-specific command line.
+    The WorkflowStepMixin is a basic utility class that provides functionality needed by workflow steps.
     """
-
-    available_tools = []
-
-    def __init__(self, **sarek_args):
-        """
-        Create a SarekWorkflowStep instance according to the passed parameters.
-
-        :param sarek_args: additional Sarek parameters to be included on the command line
-        """
-        # use a separate variable for the command to invoke sarek. This defaults to just "sarek" which is a defined
-        # alias on Irma but it can be overridden through the pipeline config option "sarek_cmd"
-        self.sarek_cmd = sarek_args.get("sarek_cmd", "sarek")
+    def __init__(self, command, hyphen="--", **kwargs):
         # create a dict with parameters based on the passed key=value arguments
-        self.sarek_args = {k: v for k, v in sarek_args.items() if k not in ["sarek_cmd"]}
         # expand any parameters passed as list items into a ","-separated string
-        self.sarek_args = {k: v if type(v) is not list else ",".join(v) for k, v in self.sarek_args.items()}
+        self.command = command
+        self.hyphen = hyphen
+        self.parameters = dict()
+        self.parameters = {k: v if type(v) is not list else ",".join(v) for k, v in kwargs.items()}
 
     def _append_argument(self, base_string, name, hyphen="--"):
         """
@@ -42,37 +32,71 @@ class SarekWorkflowStep(object):
         :return: the supplied string with an appended argument name and placeholder
         """
         # NOTE: a numeric value of 0 will be excluded (as will a boolean value of False)!
-        if not self.sarek_args.get(name):
+        if not self.parameters.get(name):
             return base_string
         return "{0} {2}{1} ${{{1}}}".format(base_string, name, hyphen)
 
     def command_line(self):
         """
-        Generate the command line for launching this analysis workflow step. The command line will be built using the
-        Sarek arguments passed to the step's constructor and returned as a string.
+        Generate the command line for launching a analysis workflow step based on the parameters. The command line will
+        be built using the arguments passed to the step's constructor and returned as a string.
 
         :return: the command line for the workflow step as a string
         """
-        single_hyphen_args = ["config", "profile", "resume"]
-        template_string = "${sarek_cmd}"
-        for argument_name in single_hyphen_args:
-            template_string = self._append_argument(template_string, argument_name, hyphen="-")
-        for argument_name in filter(lambda n: n not in single_hyphen_args, self.sarek_args.keys()):
-            template_string = self._append_argument(template_string, argument_name, hyphen="--")
+        template_string = "${command}"
+        for argument_name in self.parameters.keys():
+            template_string = self._append_argument(template_string, argument_name, hyphen=self.hyphen)
         command_line = Template(template_string).substitute(
-            sarek_cmd=self.sarek_cmd,
-            **self.sarek_args)
+            command=self.command,
+            **self.parameters)
         return command_line
-
-    def sarek_step(self):
-        raise NotImplementedError("The Sarek workflow step definition for {} has not been defined".format(type(self)))
 
     @classmethod
     def report_files(cls, analysis_sample):
         return []
 
 
+class NextflowStep(WorkflowStep):
+    """
+    The Nextflow command is implemented as a subclass of workflow step as well.
+    """
+
+    def __init__(self, command, subcommand, **kwargs):
+        """
+        Create a NextlowStep instance
+
+        :param command: the command used to invoke Nextflow
+        :param subcommand: the subcommand to pass to Nextflow (e.g. run)
+        :param kwargs: additional Nextflow parameters to be specified on the command line
+        """
+        super(NextflowStep, self).__init__("{} {}".format(command, subcommand), hyphen="-", **kwargs)
+
+
+class SarekWorkflowStep(WorkflowStep):
+    """
+    The SarekWorkflowStep class represents an analysis step in the Sarek workflow. Primarily, it provides a method for
+    creating the step-specific command line.
+    """
+
+    available_tools = []
+
+    def __init__(self, command, **kwargs):
+        """
+        Create a SarekWorkflowStep instance according to the passed parameters.
+
+        :param command: the command used to invoke sarek (i.e. the path to the relevant nextflow script)
+        :param kwargs: additional Sarek parameters to be included on the command line
+        """
+        super(SarekWorkflowStep, self).__init__(command, hyphen="--", **kwargs)
+
+    def sarek_step(self):
+        raise NotImplementedError("The Sarek workflow step definition for {} has not been defined".format(type(self)))
+
+
 class SarekMainStep(SarekWorkflowStep):
+    """
+    Create a class instance representing the main Sarek workflow step.
+    """
 
     def sarek_step(self):
         return "main.nf"

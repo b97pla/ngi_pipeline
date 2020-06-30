@@ -104,28 +104,48 @@ class TestSarekAnalysis(unittest.TestCase):
 
     def test_configure_analysis(self, charon_connector_mock, reference_genome_mock):
         config = {
-            "profile": "this-is-a-profile",
-            "tools": ["tool-A", "tool-B"],
-            "unique-key": "this-is-not-in-the-default-config"}
+            "nextflow": {
+                "config": "this-is-a-site-specific-config-file",
+                "profile": "this-is-another-profile",
+                "nf_path": "this-is-the-path-to-nextflow"},
+            "sarek": {
+                "sarek_path": "this-is-the-path-to-sarek",
+                "unique-key": "this-is-not-in-the-default-config",
+                "tools": ["tool-A", "tool-B"]}}
 
         sarek_analysis = SarekAnalysis(
             reference_genome_mock.return_value,
-            {"sarek": config},
+            config,
             self.log,
             charon_connector=charon_connector_mock.return_value)
 
-        for key in config.keys():
-            self.assertEqual(config[key], sarek_analysis.sarek_config[key])
+        for key in config["sarek"].keys():
+            self.assertEqual(config["sarek"][key], sarek_analysis.sarek_config[key])
+        for key in config["nextflow"].keys():
+            self.assertEqual(config["nextflow"][key], sarek_analysis.nextflow_config[key])
 
-        config = {
-            "config": "this-is-a-site-specific-config-file",
-            "profile": "this-is-another-profile",
-            "nf_path": "this-is-the-path-to-nextflow",
-            "sarek_path": "this-is-the-path-to-sarek"}
-        sarek_config = sarek_analysis.configure_analysis(config={"sarek": config})
-        for key in config.keys():
-            self.assertEqual(config[key], sarek_config[key])
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["tools"], sarek_config["tools"])
+        del(config["nextflow"]["profile"])
+        merged_config = sarek_analysis.configure_analysis(config=config)
+        for section in config.keys():
+            for key in config[section].keys():
+                self.assertEqual(config[section][key], merged_config[section][key])
+
+        # assert that the default dict is used if key is missing
+        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["nextflow"]["profile"], merged_config["nextflow"]["profile"])
+
+        # assert that additional options passed are included and overrides the default ones
+        extra_options = {
+            "nextflow": {
+                "unique-key": "this-is-not-in-the-default-config"
+            },
+            "sarek": {
+                "sarek_path": "this-is-the-overridden-path-to-sarek"
+            }
+        }
+        merged_config = sarek_analysis.configure_analysis(config=config, opts=extra_options)
+        for section in extra_options.keys():
+            for key in extra_options[section].keys():
+                self.assertEqual(extra_options[section][key], merged_config[section][key])
 
         # test setting the genomes_base parameter
         expected_path = os.path.join("this", "is", "the", "right", "path")
@@ -143,6 +163,27 @@ class TestSarekAnalysis(unittest.TestCase):
         self.assertIn("genomes_base", sarek_analysis.sarek_config)
         self.assertEqual(expected_path, sarek_analysis.sarek_config["genomes_base"])
         self.assertNotIn("genomes_base_paths", sarek_analysis.sarek_config)
+
+    def test_merge_configs(self, *mocks):
+        default_config = {
+            "A": "this-is-the-default-A",
+            "B": "this-is-the-default-B",
+            "C": "this-is-the-default-C"
+        }
+        global_config = {
+            "A": "this-is-the-global-A",
+            "B": "this-is-the-global-B"
+        }
+        local_config = {
+            "A": "this-is-the-local-A"
+        }
+        merged_config = SarekAnalysis.merge_configs(
+            default_config,
+            global_config,
+            **local_config)
+        self.assertEqual(local_config["A"], merged_config["A"])
+        self.assertEqual(global_config["B"], merged_config["B"])
+        self.assertEqual(default_config["C"], merged_config["C"])
 
     def test_command_line(self, charon_connector_mock, reference_genome_mock):
 
@@ -194,11 +235,14 @@ class TestSarekAnalysis(unittest.TestCase):
 class TestSarekGermlineAnalysis(unittest.TestCase):
 
     CONFIG = {
-        "profile": "this-is-a-profile",
-        "tools": ["haplotypecaller", "manta"],
-        "nf_path": os.path.join("/this", "is", "the", "nextflow", "path"),
-        "sarek_path": os.path.join("/this", "is", "the", "path", "to", "sarek"),
-        "genome": "this-is-the-genome"}
+        "nextflow": {
+            "profile": "this-is-a-profile",
+            "command": os.path.join("/this", "is", "the", "nextflow", "path"),
+            "subcommand": "this-is-the-sub"},
+        "sarek": {
+            "tools": ["haplotypecaller", "manta"],
+            "command": os.path.join("/this", "is", "the", "path", "to", "sarek"),
+            "genome": "this-is-the-genome"}}
 
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
@@ -208,10 +252,10 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
     def get_instance(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):
         reference_genome = reference_genome_mock.return_value
-        reference_genome.__str__.return_value = self.config["genome"]
+        reference_genome.__str__.return_value = self.config["sarek"]["genome"]
         return SarekGermlineAnalysis(
             reference_genome,
-            {"sarek": self.config},
+            self.config,
             self.log,
             charon_connector=charon_connector_mock,
             tracking_connector=tracking_connector_mock,
@@ -235,11 +279,15 @@ class TestSarekGermlineAnalysis(unittest.TestCase):
         self.config["input"] = analysis_sample.sample_analysis_tsv_file()
         observed_cmd = sarek_analysis.command_line(analysis_sample)
 
-        self.assertIn("-profile {}".format(self.config["profile"]), observed_cmd)
-        self.assertIn("--tools {}".format(",".join(self.config["tools"])), observed_cmd)
-        self.assertTrue(observed_cmd.startswith("sarek"))
-        for key in filter(lambda k: k not in ["profile", "nf_path", "sarek_path", "tools"], self.config.keys()):
-            self.assertIn("--{} {}".format(key, self.config[key]), observed_cmd)
+        self.assertIn("--tools {}".format(",".join(self.config["sarek"]["tools"])), observed_cmd)
+        self.assertTrue(observed_cmd.startswith(self.config["nextflow"]["command"]))
+        for key in filter(lambda x: x not in ["command", "subcommand"], self.config["nextflow"].keys()):
+            self.assertIn("-{} {}".format(key, self.config["nextflow"][key]), observed_cmd)
+        for key in filter(lambda x: x not in ["command", "tools"], self.config["sarek"].keys()):
+            self.assertIn("--{} {}".format(key, self.config["sarek"][key]), observed_cmd)
+        self.assertNotIn("-command", observed_cmd)
+        self.assertNotIn("-subcommand", observed_cmd)
+        self.assertNotIn("--command", observed_cmd)
 
     def test_generate_tsv_file_contents(
             self, process_connector_mock, tracking_connector_mock, charon_connector_mock, reference_genome_mock):

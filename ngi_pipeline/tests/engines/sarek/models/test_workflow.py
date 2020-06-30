@@ -5,20 +5,18 @@ import unittest
 from ngi_pipeline.engines.sarek.exceptions import ParserException
 from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
 from ngi_pipeline.engines.sarek.models.workflow import SarekWorkflowStep, SarekMainStep
+from tests.engines.sarek.models.test_sarek import TestSarekGermlineAnalysis
 
 
 class TestSarekWorkflowStep(unittest.TestCase):
 
-    CONFIG = {
-        "profile": "this-is-a-profile",
-        "tools": ["haplotypecaller", "manta"],
-        "nf_path": os.path.join("/this", "is", "the", "nextflow", "path"),
-        "sarek_path": os.path.join("/this", "is", "the", "path", "to", "sarek"),
-        "genome": "this-is-the-genome"}
+    CONFIG = TestSarekGermlineAnalysis.CONFIG
 
     def setUp(self):
-        self.sarek_args = self.CONFIG.copy()
-        self.sarek_workflow_step = SarekWorkflowStep(**self.sarek_args)
+        self.sarek_args = self.CONFIG["sarek"].copy()
+        self.sarek_workflow_step = SarekWorkflowStep(
+            self.sarek_args["command"],
+            **{k: v for k, v in self.sarek_args.items() if k != "command"})
 
     def test__append_argument(self):
         base_string = "this-is-the-base-string"
@@ -35,14 +33,14 @@ class TestSarekWorkflowStep(unittest.TestCase):
         # test a list attribute
         attribute = "list_attribute"
         value = ["this", "is", "a", "list"]
-        self.sarek_workflow_step.sarek_args[attribute] = value
+        self.sarek_workflow_step.parameters[attribute] = value
         expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
         self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
 
         # test a string attribute
         attribute = "string_attribute"
         value = "this-is-a-string"
-        self.sarek_workflow_step.sarek_args[attribute] = value
+        self.sarek_workflow_step.parameters[attribute] = value
         expected_result = "{0} --{1} ${{{1}}}".format(base_string, attribute)
         self.assertEqual(expected_result, self.sarek_workflow_step._append_argument(base_string, attribute))
 
@@ -58,22 +56,16 @@ class TestSarekWorkflowStep(unittest.TestCase):
             self.sarek_workflow_step.sarek_step()
 
     def test_command_line(self):
-        sarek_step = "sarek_step"
-        sarek_workflow_step = SarekWorkflowStep()
-        with mock.patch.object(sarek_workflow_step, "sarek_step", return_value=sarek_step) as sarek_step_mock:
-            expected_command_line = "sarek"
-            self.assertEqual(expected_command_line, sarek_workflow_step.command_line())
+        sarek_workflow_step = SarekWorkflowStep(self.sarek_args["command"])
+        self.assertEqual(self.sarek_args["command"], sarek_workflow_step.command_line())
 
     def test_command_line_args(self):
-        sarek_step = "sarek_step"
         valid_tools = self.sarek_args["tools"]
-        with mock.patch.object(self.sarek_workflow_step, "sarek_step", return_value=sarek_step):
-            observed_command_line = self.sarek_workflow_step.command_line()
-            self.assertIn("--tools", observed_command_line)
-            self.assertIn(",".join(valid_tools), observed_command_line)
-            for key, value in self.sarek_args.items():
-                if key not in ["tools", "sarek_path", "nf_path"]:
-                    self.assertIn("-{} {}".format(key, value), observed_command_line)
+        observed_command_line = self.sarek_workflow_step.command_line()
+        self.assertIn("--tools", observed_command_line)
+        self.assertIn(",".join(valid_tools), observed_command_line)
+        for key in filter(lambda x: x not in ["tools", "command"], self.sarek_args.keys()):
+            self.assertIn("-{} {}".format(key, self.sarek_args[key]), observed_command_line)
 
 
 class TestSarekMainStep(unittest.TestCase):
@@ -82,6 +74,7 @@ class TestSarekMainStep(unittest.TestCase):
         analysis_sample = mock.Mock(spec=SarekAnalysisSample)
         analysis_sample.sampleid = "this-is-a-sample-id"
         analysis_sample.sample_analysis_path.return_value = "this-is-a-path"
+        analysis_sample.sample_analysis_results_dir.return_value = "this-is-the-results-path"
         with mock.patch("os.listdir") as list_mock:
             file_list = ["file1", "file2.extension", "file3.metrics", "file4.metrics"]
             for listed_files in [file_list[0:2], file_list]:
