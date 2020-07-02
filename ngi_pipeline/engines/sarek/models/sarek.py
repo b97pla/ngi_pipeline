@@ -60,9 +60,7 @@ class SarekAnalysis(object):
         self.reference_genome = reference_genome
         self.config = config
         self.log = log
-        merged_configs = self.configure_analysis(
-            opts={"sarek": {
-                "genome": self.reference_genome}})
+        merged_configs = self.configure_analysis(opts={"sarek": {"genome": self.reference_genome}})
         self.sarek_config = merged_configs["sarek"]
         self.nextflow_config = merged_configs["nextflow"]
         self.charon_connector = charon_connector or CharonConnector(self.config, self.log)
@@ -94,9 +92,10 @@ class SarekAnalysis(object):
             )
 
         # make sure to configure the correct genomes_base parameter if it's not set
-        merged_configs["sarek"]["genomes_base"] = merged_configs["sarek"].get(
-            "genomes_base",
-            self.reference_genome.get_genomes_base_path(merged_configs["sarek"]))
+        if self.reference_genome is not None:
+            merged_configs["sarek"]["genomes_base"] = merged_configs["sarek"].get(
+                "genomes_base",
+                self.reference_genome.get_genomes_base_path(merged_configs["sarek"]))
         # let's unset the genomes_base_paths item since we don't want it to show up on the command line
         try:
             del(merged_configs["sarek"]["genomes_base_paths"])

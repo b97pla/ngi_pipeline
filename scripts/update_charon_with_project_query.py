@@ -3,10 +3,10 @@
 import argparse
 import os
 
-from ngi_pipeline.engines import sarek
+from ngi_pipeline.engines.sarek import local_process_tracking
 from ngi_pipeline.engines.sarek.database import TrackingConnector
-from ngi_pipeline.utils.classes import with_ngi_config
 from ngi_pipeline.log.loggers import minimal_logger
+from ngi_pipeline.utils.classes import with_ngi_config
 
 LOG = minimal_logger(__name__, debug=True)
 
@@ -40,7 +40,7 @@ class DiskTrackingSession(object):
 
 
 @with_ngi_config
-def update_charon_with_project(project, sample=None, config=None):
+def update_charon_with_project(project, sample=None, config=None, config_file_path=None):
     project_base_path = os.path.join(
         config["analysis"]["base_root"],
         config["analysis"]["upps_root"],
@@ -69,7 +69,7 @@ def update_charon_with_project(project, sample=None, config=None):
         config,
         LOG,
         tracking_session=db_session)
-    sarek.local_process_tracking.update_charon_with_local_jobs_status(
+    local_process_tracking.update_charon_with_local_jobs_status(
         config=config,
         log=LOG,
         tracking_connector=tracking_connector)
@@ -85,4 +85,4 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--config", required=False)
 
     args = parser.parse_args()
-    update_charon_with_project(args.project, sample=args.get("sample"), config=args.get("config"))
+    update_charon_with_project(args.project, sample=args.sample, config_file_path=args.config)
