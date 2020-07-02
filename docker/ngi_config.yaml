@@ -37,8 +37,9 @@ sarek:
     genomes_base_paths:
         GRCh37: /sw/data/uppnex/ToolBox/ReferenceAssemblies/hg38make/bundle/2.8/b37/
         GRCh38: /sw/data/uppnex/ToolBox/hg38bundle/
-    project: ngi2016001
-    custom_config_base: /lupus/ngi/staging/200527.1473bf1/sw//sarek/configs/
+    project: ngi2016000
+    custom_config_base: /lupus/ngi/staging/latest/sw/sarek/configs/
+    command: /lupus/ngi/staging/latest/sw/sarek/workflow/main.nf
     igenomes_ignore: " "
     no_gatk_spark: " "
     sequencing_center: "NGI-U"
@@ -46,8 +47,8 @@ sarek:
 nextflow:
     profile: uppmax
     config:
-        - /lupus/ngi/staging/200527.1473bf1/conf//nextflow_irma_upps.config
-        - /lupus/ngi/staging/200527.1473bf1/conf//sarek_irma.config
+        - /lupus/ngi/staging/latest/conf/nextflow_irma_upps.config
+        - /lupus/ngi/staging/latest/conf/sarek_irma.config
     resume: " "
 
 supported_genomes:
