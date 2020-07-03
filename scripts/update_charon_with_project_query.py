@@ -53,17 +53,20 @@ def update_charon_with_project(project, sample=None, config=None, config_file_pa
 
     db_session = DiskTrackingSession()
 
-    for sample in os.listdir(project_analysis_dir):
-        db_session.add(
-            TrackingConnector._SampleAnalysis(
-                project_id=project,
-                project_name=project,
-                sample_id=os.path.basename(sample),
-                project_base_path=project_base_path,
-                workflow="SarekGermlineAnalysis",
-                engine="sarek",
-                process_id=999999999999)
-            )
+    for project_sample in os.listdir(project_analysis_dir):
+        if os.path.isdir(
+                os.path.join(project_analysis_dir, project_sample)):
+            if sample is None or sample == os.path.basename(project_sample):
+                db_session.add(
+                    TrackingConnector._SampleAnalysis(
+                        project_id=project,
+                        project_name=project,
+                        sample_id=os.path.basename(project_sample),
+                        project_base_path=project_base_path,
+                        workflow="SarekGermlineAnalysis",
+                        engine="sarek",
+                        process_id=999999)
+                    )
 
     tracking_connector = TrackingConnector(
         config,

@@ -5,7 +5,7 @@ import unittest
 from ngi_pipeline.engines.sarek.exceptions import ParserException
 from ngi_pipeline.engines.sarek.models.sample import SarekAnalysisSample
 from ngi_pipeline.engines.sarek.models.workflow import SarekWorkflowStep, SarekMainStep
-from tests.engines.sarek.models.test_sarek import TestSarekGermlineAnalysis
+from ngi_pipeline.tests.engines.sarek.models.test_sarek import TestSarekGermlineAnalysis
 
 
 class TestSarekWorkflowStep(unittest.TestCase):
