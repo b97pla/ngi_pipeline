@@ -30,7 +30,7 @@ piper:
     gatk_key: "/path/to/gatk.key"
 
 sarek:
-    tag: 2.6
+    tag: 2.6.1
     tools:
       - haplotypecaller
       - snpeff
