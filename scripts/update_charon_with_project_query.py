@@ -39,6 +39,28 @@ class DiskTrackingSession(object):
         return self
 
 
+def update_charon_with_sample(db_session, project_base_path, project_analysis_dir, project_sample, limit_to_sample):
+    project_id = os.path.basename(project_analysis_dir)
+    sample_path = os.path.join(project_analysis_dir, project_sample)
+    sample_id = os.path.basename(project_sample)
+    if not os.path.isdir(sample_path):
+        return
+
+    # skip if we are only to add a specified sample and this is not it
+    if limit_to_sample is not None and limit_to_sample != sample_id:
+        return
+
+    db_session.add(
+        TrackingConnector._SampleAnalysis(
+            project_id=project_id,
+            project_name=project_id,
+            sample_id=sample_id,
+            project_base_path=project_base_path,
+            workflow="SarekGermlineAnalysis",
+            engine="sarek",
+            process_id=999999)
+    )
+
 @with_ngi_config
 def update_charon_with_project(project, sample=None, config=None, config_file_path=None):
     project_base_path = os.path.join(
@@ -54,19 +76,12 @@ def update_charon_with_project(project, sample=None, config=None, config_file_pa
     db_session = DiskTrackingSession()
 
     for project_sample in os.listdir(project_analysis_dir):
-        if os.path.isdir(
-                os.path.join(project_analysis_dir, project_sample)):
-            if sample is None or sample == os.path.basename(project_sample):
-                db_session.add(
-                    TrackingConnector._SampleAnalysis(
-                        project_id=project,
-                        project_name=project,
-                        sample_id=os.path.basename(project_sample),
-                        project_base_path=project_base_path,
-                        workflow="SarekGermlineAnalysis",
-                        engine="sarek",
-                        process_id=999999)
-                    )
+        update_charon_with_sample(
+            db_session,
+            project_base_path,
+            project_analysis_dir,
+            project_sample,
+            sample)
 
     tracking_connector = TrackingConnector(
         config,
