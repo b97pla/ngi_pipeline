@@ -18,7 +18,16 @@ from ngi_pipeline.tests.engines.sarek.test_launchers import TestLaunchers
 @mock.patch("ngi_pipeline.engines.sarek.database.CharonConnector", autospec=True)
 class TestSarekAnalysis(unittest.TestCase):
 
-    CONFIG = {}
+    CONFIG = {
+            "nextflow": {
+                "config": "this-is-a-site-specific-config-file",
+                "profile": "this-is-another-profile",
+                "nf_path": "this-is-the-path-to-nextflow"},
+            "sarek": {
+                "sarek_path": "this-is-the-path-to-sarek",
+                "unique-key": "this-is-not-in-the-default-config",
+                "tools": ["tool-A", "tool-B"]}
+    }
 
     def setUp(self):
         self.log = minimal_logger(__name__, to_file=False, debug=True)
@@ -103,15 +112,23 @@ class TestSarekAnalysis(unittest.TestCase):
             sarek_analysis.status_should_be_started("TO_BE_ANALYZED"))
 
     def test_configure_analysis(self, charon_connector_mock, reference_genome_mock):
-        config = {
-            "nextflow": {
-                "config": "this-is-a-site-specific-config-file",
-                "profile": "this-is-another-profile",
-                "nf_path": "this-is-the-path-to-nextflow"},
-            "sarek": {
-                "sarek_path": "this-is-the-path-to-sarek",
-                "unique-key": "this-is-not-in-the-default-config",
-                "tools": ["tool-A", "tool-B"]}}
+
+        sarek_analysis = SarekAnalysis(
+            reference_genome_mock.return_value,
+            self.config,
+            self.log,
+            charon_connector=charon_connector_mock.return_value)
+
+        # assert that the supplied config was split up and the correct key-value pairs were set
+        for key in self.config["sarek"].keys():
+            self.assertEqual(self.config["sarek"][key], sarek_analysis.sarek_config[key])
+        for key in self.config["nextflow"].keys():
+            self.assertEqual(self.config["nextflow"][key], sarek_analysis.nextflow_config[key])
+
+    def test_configure_analysis_missing_key(self, charon_connector_mock, reference_genome_mock):
+
+        config = self.config.copy()
+        del(config["nextflow"]["profile"])
 
         sarek_analysis = SarekAnalysis(
             reference_genome_mock.return_value,
@@ -119,19 +136,18 @@ class TestSarekAnalysis(unittest.TestCase):
             self.log,
             charon_connector=charon_connector_mock.return_value)
 
-        for key in config["sarek"].keys():
-            self.assertEqual(config["sarek"][key], sarek_analysis.sarek_config[key])
-        for key in config["nextflow"].keys():
-            self.assertEqual(config["nextflow"][key], sarek_analysis.nextflow_config[key])
-
-        del(config["nextflow"]["profile"])
-        merged_config = sarek_analysis.configure_analysis(config=config)
-        for section in config.keys():
-            for key in config[section].keys():
-                self.assertEqual(config[section][key], merged_config[section][key])
-
         # assert that the default dict is used if key is missing
-        self.assertEqual(SarekAnalysis.DEFAULT_CONFIG["nextflow"]["profile"], merged_config["nextflow"]["profile"])
+        self.assertEqual(
+            SarekAnalysis.DEFAULT_CONFIG["nextflow"]["profile"],
+            sarek_analysis.nextflow_config["profile"])
+
+    def test_configure_analysis_additional_options(self, charon_connector_mock, reference_genome_mock):
+
+        sarek_analysis = SarekAnalysis(
+            reference_genome_mock.return_value,
+            self.config,
+            self.log,
+            charon_connector=charon_connector_mock.return_value)
 
         # assert that additional options passed are included and overrides the default ones
         extra_options = {
@@ -142,10 +158,12 @@ class TestSarekAnalysis(unittest.TestCase):
                 "sarek_path": "this-is-the-overridden-path-to-sarek"
             }
         }
-        merged_config = sarek_analysis.configure_analysis(config=config, opts=extra_options)
+        merged_config = sarek_analysis.configure_analysis(opts=extra_options)
         for section in extra_options.keys():
             for key in extra_options[section].keys():
                 self.assertEqual(extra_options[section][key], merged_config[section][key])
+
+    def test_configure_analysis_genomes_paths(self, charon_connector_mock, reference_genome_mock):
 
         # test setting the genomes_base parameter
         expected_path = os.path.join("this", "is", "the", "right", "path")
