@@ -39,11 +39,11 @@ class DiskTrackingSession(object):
         return self
 
 
-def update_charon_with_sample(db_session, project_base_path, project_analysis_dir, project_sample, limit_to_sample):
+def update_charon_with_sample(db_session, project_base_path, project_sample_dir, limit_to_sample):
+    project_analysis_dir = os.path.dirname(project_sample_dir)
     project_id = os.path.basename(project_analysis_dir)
-    sample_path = os.path.join(project_analysis_dir, project_sample)
-    sample_id = os.path.basename(project_sample)
-    if not os.path.isdir(sample_path):
+    sample_id = os.path.basename(project_sample_dir)
+    if not os.path.isdir(project_sample_dir):
         return
 
     # skip if we are only to add a specified sample and this is not it
@@ -76,11 +76,11 @@ def update_charon_with_project(project, sample=None, config=None, config_file_pa
     db_session = DiskTrackingSession()
 
     for project_sample in os.listdir(project_analysis_dir):
+        sample_path = os.path.join(project_analysis_dir, project_sample)
         update_charon_with_sample(
             db_session,
             project_base_path,
-            project_analysis_dir,
-            project_sample,
+            sample_path,
             sample)
 
     tracking_connector = TrackingConnector(
